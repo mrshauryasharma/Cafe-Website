@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: 'Times New Roman', Times, Georgia, serif;
+  background-color: #FAF9F6;
+  color: #111111;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Ensure numbers in currency, counters, points, and tables align tabularly */
+.tabular-nums,
+[data-tabular="true"] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom styled inputs and selects */
+input, select, textarea, button {
+  font-family: 'Times New Roman', Times, Georgia, serif;
+}
+
+/* Ensure smooth touch scrolling */
+* {
+  -webkit-tap-highlight-color: transparent;
+}

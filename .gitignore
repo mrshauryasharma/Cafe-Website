@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Production build
+dist/
+dist-ssr/
+
+# Cloudflare & Environment Secrets
+.dev.vars
+.dev.vars.*
+.wrangler/
+*.local
+
+# Local SQLite databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs & System files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
