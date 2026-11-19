@@ -134,11 +134,27 @@ export async function ensureSchema(db: D1Database): Promise<void> {
           FOREIGN KEY (customer_id) REFERENCES customers(id)
         );
       `),
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS inventory_logs (
+          id TEXT PRIMARY KEY,
+          menu_item_id TEXT NOT NULL,
+          item_name TEXT NOT NULL,
+          change_type TEXT NOT NULL CHECK (change_type IN ('restock', 'wastage', 'adjustment', 'sale')),
+          quantity_change INTEGER NOT NULL,
+          stock_after INTEGER NOT NULL,
+          notes TEXT,
+          performed_by TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (menu_item_id) REFERENCES menu_items(id) ON DELETE CASCADE
+        );
+      `),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_nfc_cards_uid ON nfc_cards(card_uid);`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_points_ledger_customer ON points_ledger(customer_id);`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_draft_orders_created ON draft_orders(created_at);`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_inventory_logs_created_at ON inventory_logs(created_at DESC);`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_inventory_logs_item ON inventory_logs(menu_item_id);`),
     ]);
 
     // Safe non-destructive column additions for existing tables

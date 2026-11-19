@@ -286,7 +286,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         )
       );
 
-      // C. Stock decrement when item is from menu_items
+      // C. Stock decrement & inventory log when item is from menu_items
       if (item.menu_item_id) {
         statements.push(
           env.DB.prepare(
@@ -294,6 +294,22 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
              SET stock_qty = MAX(0, stock_qty - ?)
              WHERE id = ?`
           ).bind(item.quantity, item.menu_item_id)
+        );
+
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO inventory_logs (id, menu_item_id, item_name, change_type, quantity_change, stock_after, notes, performed_by, created_at)
+             SELECT ?, id, name, 'sale', ?, MAX(0, stock_qty - ?), ?, ?, ?
+             FROM menu_items WHERE id = ?`
+          ).bind(
+            crypto.randomUUID(),
+            -item.quantity,
+            item.quantity,
+            `Sale on Order #${orderNumber}`,
+            staffAttribution,
+            now,
+            item.menu_item_id
+          )
         );
       }
     }

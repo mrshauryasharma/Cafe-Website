@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   UtensilsCrossed,
+  Boxes,
   Users2,
   CreditCard,
   Shield,
@@ -9,6 +10,7 @@ import {
 } from 'lucide-react';
 import { BrandingRulesTab } from './BrandingRulesTab';
 import { DigitalMenuTab } from './DigitalMenuTab';
+import { InventoryTab } from './InventoryTab';
 import { StaffAccountsTab } from './StaffAccountsTab';
 import { CardsManagerTab } from './CardsManagerTab';
 import { BackupRecoveryTab } from './BackupRecoveryTab';
@@ -18,7 +20,21 @@ interface OwnerDashboardProps {
 }
 
 export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onCafeNameChange }) => {
-  const [activeTab, setActiveTab] = useState<'branding' | 'menu' | 'staff' | 'cards' | 'backup'>('branding');
+  const [activeTab, setActiveTab] = useState<'branding' | 'menu' | 'inventory' | 'staff' | 'cards' | 'backup'>('branding');
+  const [lowStockAlertCount, setLowStockAlertCount] = useState<number>(0);
+
+  // Check low stock alert count for tab badge
+  useEffect(() => {
+    fetch('/api/owner/inventory')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: any) => {
+        if (data?.kpis) {
+          const totalAlerts = (data.kpis.low_stock_count || 0) + (data.kpis.out_of_stock_count || 0);
+          setLowStockAlertCount(totalAlerts);
+        }
+      })
+      .catch(() => {});
+  }, [activeTab]);
 
   return (
     <div className="space-y-6">
@@ -30,13 +46,13 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onCafeNameChange
           </div>
           <div>
             <h2 className="font-bold text-[#111111] text-lg sm:text-xl font-serif">Owner Management Console</h2>
-            <p className="text-xs text-[#52525B]">Master branding, catalog, staff accounts & backup safety</p>
+            <p className="text-xs text-[#52525B]">Master branding, catalog, live inventory, staff accounts &amp; backup safety</p>
           </div>
         </div>
       </div>
 
-      {/* 5 Tabs Selector */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 p-1.5 bg-[#F3EFEA] border border-[#E6E2DA] rounded-2xl">
+      {/* 6 Tabs Selector */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 p-1.5 bg-[#F3EFEA] border border-[#E6E2DA] rounded-2xl">
         <button
           type="button"
           onClick={() => setActiveTab('branding')}
@@ -61,6 +77,24 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onCafeNameChange
         >
           <UtensilsCrossed className="w-4 h-4" />
           <span>Digital Menu</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('inventory')}
+          className={`min-h-[44px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer relative ${
+            activeTab === 'inventory'
+              ? 'bg-[#111111] text-white shadow-xs'
+              : 'text-[#52525B] hover:text-[#111111]'
+          }`}
+        >
+          <Boxes className="w-4 h-4" />
+          <span>Inventory</span>
+          {lowStockAlertCount > 0 && (
+            <span className="bg-[#DC2626] text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full tabular-nums">
+              {lowStockAlertCount}
+            </span>
+          )}
         </button>
 
         <button
@@ -92,14 +126,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onCafeNameChange
         <button
           type="button"
           onClick={() => setActiveTab('backup')}
-          className={`min-h-[44px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all col-span-2 sm:col-span-1 cursor-pointer ${
+          className={`min-h-[44px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
             activeTab === 'backup'
               ? 'bg-[#111111] text-white shadow-xs'
               : 'text-[#52525B] hover:text-[#111111]'
           }`}
         >
           <Database className="w-4 h-4" />
-          <span>Backup & Recovery</span>
+          <span>Backup</span>
         </button>
       </div>
 
@@ -107,6 +141,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onCafeNameChange
       <div>
         {activeTab === 'branding' && <BrandingRulesTab onCafeNameChange={onCafeNameChange} />}
         {activeTab === 'menu' && <DigitalMenuTab />}
+        {activeTab === 'inventory' && <InventoryTab />}
         {activeTab === 'staff' && <StaffAccountsTab />}
         {activeTab === 'cards' && <CardsManagerTab />}
         {activeTab === 'backup' && <BackupRecoveryTab />}

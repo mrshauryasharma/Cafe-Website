@@ -129,9 +129,25 @@ CREATE TABLE IF NOT EXISTS points_ledger (
   FOREIGN KEY (customer_id) REFERENCES customers(id)
 );
 
+-- 10. Inventory Audit Logs
+CREATE TABLE IF NOT EXISTS inventory_logs (
+  id TEXT PRIMARY KEY,
+  menu_item_id TEXT NOT NULL,
+  item_name TEXT NOT NULL,
+  change_type TEXT NOT NULL CHECK (change_type IN ('restock', 'wastage', 'adjustment', 'sale')),
+  quantity_change INTEGER NOT NULL,
+  stock_after INTEGER NOT NULL,
+  notes TEXT,
+  performed_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (menu_item_id) REFERENCES menu_items(id) ON DELETE CASCADE
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
 CREATE INDEX IF NOT EXISTS idx_nfc_cards_uid ON nfc_cards(card_uid);
 CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_points_ledger_customer ON points_ledger(customer_id);
 CREATE INDEX IF NOT EXISTS idx_draft_orders_created ON draft_orders(created_at);
+CREATE INDEX IF NOT EXISTS idx_inventory_logs_created_at ON inventory_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_inventory_logs_item ON inventory_logs(menu_item_id);

@@ -29,6 +29,10 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
     const category = body.category?.trim();
     const price = body.price !== undefined ? Number(body.price) : undefined;
     const isAvailable = body.is_available !== undefined ? (body.is_available ? 1 : 0) : undefined;
+    const imageUrl = body.image_url !== undefined ? (body.image_url?.trim() || null) : undefined;
+    const stockQty = body.stock_qty !== undefined ? Math.max(0, Number(body.stock_qty)) : undefined;
+    const maxStock = body.max_stock !== undefined ? Math.max(0, Number(body.max_stock)) : undefined;
+    const lowStockAlert = body.low_stock_alert !== undefined ? Math.max(0, Number(body.low_stock_alert)) : undefined;
 
     if (name !== undefined && name.length === 0) {
       return new Response(JSON.stringify({ error: 'Item name cannot be empty' }), {
@@ -56,13 +60,22 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
        SET name = COALESCE(?, name),
            category = COALESCE(?, category),
            price = COALESCE(?, price),
-           is_available = COALESCE(?, is_available)
+           is_available = COALESCE(?, is_available),
+           image_url = CASE WHEN ? IS NOT NULL THEN ? ELSE image_url END,
+           stock_qty = COALESCE(?, stock_qty),
+           max_stock = COALESCE(?, max_stock),
+           low_stock_alert = COALESCE(?, low_stock_alert)
        WHERE id = ?`
     ).bind(
       name ?? null,
       category ?? null,
       price !== undefined ? price : null,
       isAvailable !== undefined ? isAvailable : null,
+      body.image_url !== undefined ? 1 : null,
+      imageUrl,
+      stockQty !== undefined ? stockQty : null,
+      maxStock !== undefined ? maxStock : null,
+      lowStockAlert !== undefined ? lowStockAlert : null,
       id
     ).run();
 

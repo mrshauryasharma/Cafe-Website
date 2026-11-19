@@ -13,6 +13,8 @@ interface BackupPayload {
     orders?: any[];
     order_items?: any[];
     points_ledger?: any[];
+    draft_orders?: any[];
+    inventory_logs?: any[];
   };
 }
 
@@ -109,14 +111,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       for (const m of data.menu_items) {
         statements.push(
           env.DB.prepare(
-            `INSERT INTO menu_items (id, name, category, price, is_available, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)`
+            `INSERT INTO menu_items (id, name, category, price, is_available, image_url, stock_qty, max_stock, low_stock_alert, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).bind(
             m.id || crypto.randomUUID(),
             m.name,
             m.category,
             m.price,
             m.is_available ?? 1,
+            m.image_url ?? null,
+            m.stock_qty ?? 100,
+            m.max_stock ?? 100,
+            m.low_stock_alert ?? 10,
             m.created_at || new Date().toISOString()
           )
         );
@@ -171,8 +177,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       for (const o of data.orders) {
         statements.push(
           env.DB.prepare(
-            `INSERT INTO orders (id, order_number, customer_id, staff_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, idempotency_key, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            `INSERT INTO orders (id, order_number, customer_id, staff_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, idempotency_key, dining_type, table_number, extra_discount, payment_method, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).bind(
             o.id || crypto.randomUUID(),
             o.order_number,
@@ -184,6 +190,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             o.final_amount,
             o.points_earned ?? 0,
             o.idempotency_key || crypto.randomUUID(),
+            o.dining_type || 'Dine-In',
+            o.table_number ?? null,
+            o.extra_discount ?? 0,
+            o.payment_method || 'Cash/UPI',
             o.created_at || new Date().toISOString()
           )
         );
@@ -195,8 +205,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       for (const oi of data.order_items) {
         statements.push(
           env.DB.prepare(
-            `INSERT INTO order_items (id, order_id, menu_item_id, item_name, quantity, unit_price, total_price)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`
+            `INSERT INTO order_items (id, order_id, menu_item_id, item_name, quantity, unit_price, total_price, notes)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
           ).bind(
             oi.id || crypto.randomUUID(),
             oi.order_id,
@@ -204,7 +214,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             oi.item_name,
             oi.quantity,
             oi.unit_price,
-            oi.total_price
+            oi.total_price,
+            oi.notes ?? null
           )
         );
       }
@@ -227,6 +238,50 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             pl.reason ?? null,
             pl.performed_by,
             pl.created_at || new Date().toISOString()
+          )
+        );
+      }
+    }
+
+    // 9. draft_orders
+    if (data.draft_orders) {
+      for (const d of data.draft_orders) {
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO draft_orders (id, draft_number, customer_id, dining_type, table_number, items_json, notes, created_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            d.id || crypto.randomUUID(),
+            d.draft_number,
+            d.customer_id ?? null,
+            d.dining_type || 'Dine-In',
+            d.table_number ?? null,
+            d.items_json || '[]',
+            d.notes ?? null,
+            d.created_by,
+            d.created_at || new Date().toISOString()
+          )
+        );
+      }
+    }
+
+    // 10. inventory_logs
+    if (data.inventory_logs) {
+      for (const log of data.inventory_logs) {
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO inventory_logs (id, menu_item_id, item_name, change_type, quantity_change, stock_after, notes, performed_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            log.id || crypto.randomUUID(),
+            log.menu_item_id,
+            log.item_name,
+            log.change_type,
+            log.quantity_change,
+            log.stock_after,
+            log.notes ?? null,
+            log.performed_by,
+            log.created_at || new Date().toISOString()
           )
         );
       }

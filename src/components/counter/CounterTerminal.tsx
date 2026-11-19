@@ -664,6 +664,14 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     return matchesCat && matchesSearch;
   });
 
+  const lowStockAlertCount = useMemo(() => {
+    return menuItems.filter((i) => {
+      const qty = i.stock_qty ?? 100;
+      const threshold = i.low_stock_alert ?? 10;
+      return qty <= threshold;
+    }).length;
+  }, [menuItems]);
+
   return (
     <div className="space-y-4">
       {/* Feedback Alerts */}
@@ -894,6 +902,17 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Live Low Stock Indicator Pill */}
+              {lowStockAlertCount > 0 && (
+                <div
+                  title="Items in catalog running low or out of stock"
+                  className="min-h-[42px] px-3 py-1.5 bg-[#FFFBEB] border border-[#FDE68A] text-[#92400E] rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  <AlertCircle className="w-3.5 h-3.5 text-[#D97706] flex-shrink-0" />
+                  <span>{lowStockAlertCount} Low Stock</span>
+                </div>
+              )}
+
               {/* Drafts Drawer Trigger Button */}
               <button
                 type="button"

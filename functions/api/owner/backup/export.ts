@@ -12,7 +12,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     // 1. Update last_backup_at in cafe_settings
     await env.DB.prepare('UPDATE cafe_settings SET last_backup_at = ? WHERE id = 1').bind(now).run();
 
-    // 2. Fetch all 8 tables
+    // 2. Fetch all tables
     const [
       settingsResult,
       usersResult,
@@ -22,6 +22,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       ordersResult,
       orderItemsResult,
       ledgerResult,
+      draftsResult,
+      inventoryLogsResult,
     ] = await Promise.all([
       env.DB.prepare('SELECT * FROM cafe_settings').all(),
       env.DB.prepare('SELECT * FROM users').all(),
@@ -31,6 +33,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       env.DB.prepare('SELECT * FROM orders').all(),
       env.DB.prepare('SELECT * FROM order_items').all(),
       env.DB.prepare('SELECT * FROM points_ledger').all(),
+      env.DB.prepare('SELECT * FROM draft_orders').all(),
+      env.DB.prepare('SELECT * FROM inventory_logs').all(),
     ]);
 
     const backupPayload = {
@@ -45,6 +49,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         orders: ordersResult.results || [],
         order_items: orderItemsResult.results || [],
         points_ledger: ledgerResult.results || [],
+        draft_orders: draftsResult.results || [],
+        inventory_logs: inventoryLogsResult.results || [],
       },
     };
 
