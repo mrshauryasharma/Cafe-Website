@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
+  BarChart3,
   Sparkles,
   UtensilsCrossed,
   Boxes,
@@ -8,6 +9,7 @@ import {
   Shield,
   Database,
 } from 'lucide-react';
+import { AnalyticsReportsTab } from './AnalyticsReportsTab';
 import { BrandingRulesTab } from './BrandingRulesTab';
 import { DigitalMenuTab } from './DigitalMenuTab';
 import { InventoryTab } from './InventoryTab';
@@ -20,7 +22,7 @@ interface OwnerDashboardProps {
 }
 
 export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onCafeNameChange }) => {
-  const [activeTab, setActiveTab] = useState<'branding' | 'menu' | 'inventory' | 'staff' | 'cards' | 'backup'>('branding');
+  const [activeTab, setActiveTab] = useState<'reports' | 'inventory' | 'menu' | 'branding' | 'staff' | 'cards' | 'backup'>('reports');
   const [lowStockAlertCount, setLowStockAlertCount] = useState<number>(0);
 
   // Check low stock alert count for tab badge
@@ -46,37 +48,24 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onCafeNameChange
           </div>
           <div>
             <h2 className="font-bold text-[#111111] text-lg sm:text-xl font-serif">Owner Management Console</h2>
-            <p className="text-xs text-[#52525B]">Master branding, catalog, live inventory, staff accounts &amp; backup safety</p>
+            <p className="text-xs text-[#52525B]">Executive reports, live inventory, menu catalog, staff accounts &amp; backup safety</p>
           </div>
         </div>
       </div>
 
-      {/* 6 Tabs Selector */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 p-1.5 bg-[#F3EFEA] border border-[#E6E2DA] rounded-2xl">
+      {/* 7 Tabs Selector */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-1.5 p-1.5 bg-[#F3EFEA] border border-[#E6E2DA] rounded-2xl">
         <button
           type="button"
-          onClick={() => setActiveTab('branding')}
+          onClick={() => setActiveTab('reports')}
           className={`min-h-[44px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
-            activeTab === 'branding'
+            activeTab === 'reports'
               ? 'bg-[#111111] text-white shadow-xs'
               : 'text-[#52525B] hover:text-[#111111]'
           }`}
         >
-          <Sparkles className="w-4 h-4" />
-          <span>Branding</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('menu')}
-          className={`min-h-[44px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
-            activeTab === 'menu'
-              ? 'bg-[#111111] text-white shadow-xs'
-              : 'text-[#52525B] hover:text-[#111111]'
-          }`}
-        >
-          <UtensilsCrossed className="w-4 h-4" />
-          <span>Digital Menu</span>
+          <BarChart3 className="w-4 h-4" />
+          <span>Reports &amp; Analytics</span>
         </button>
 
         <button
@@ -95,6 +84,32 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onCafeNameChange
               {lowStockAlertCount}
             </span>
           )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('menu')}
+          className={`min-h-[44px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+            activeTab === 'menu'
+              ? 'bg-[#111111] text-white shadow-xs'
+              : 'text-[#52525B] hover:text-[#111111]'
+          }`}
+        >
+          <UtensilsCrossed className="w-4 h-4" />
+          <span>Digital Menu</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('branding')}
+          className={`min-h-[44px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+            activeTab === 'branding'
+              ? 'bg-[#111111] text-white shadow-xs'
+              : 'text-[#52525B] hover:text-[#111111]'
+          }`}
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>Branding</span>
         </button>
 
         <button
@@ -126,7 +141,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onCafeNameChange
         <button
           type="button"
           onClick={() => setActiveTab('backup')}
-          className={`min-h-[44px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+          className={`min-h-[44px] flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer col-span-2 sm:col-span-2 lg:col-span-1 ${
             activeTab === 'backup'
               ? 'bg-[#111111] text-white shadow-xs'
               : 'text-[#52525B] hover:text-[#111111]'
@@ -139,9 +154,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onCafeNameChange
 
       {/* Tab Panels */}
       <div>
-        {activeTab === 'branding' && <BrandingRulesTab onCafeNameChange={onCafeNameChange} />}
-        {activeTab === 'menu' && <DigitalMenuTab />}
+        {activeTab === 'reports' && <AnalyticsReportsTab />}
         {activeTab === 'inventory' && <InventoryTab />}
+        {activeTab === 'menu' && <DigitalMenuTab />}
+        {activeTab === 'branding' && <BrandingRulesTab onCafeNameChange={onCafeNameChange} />}
         {activeTab === 'staff' && <StaffAccountsTab />}
         {activeTab === 'cards' && <CardsManagerTab />}
         {activeTab === 'backup' && <BackupRecoveryTab />}
