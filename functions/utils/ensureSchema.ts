@@ -40,6 +40,10 @@ export async function ensureSchema(db: D1Database): Promise<void> {
           category TEXT NOT NULL,
           price REAL NOT NULL,
           is_available INTEGER NOT NULL DEFAULT 1,
+          image_url TEXT,
+          stock_qty INTEGER NOT NULL DEFAULT 100,
+          max_stock INTEGER NOT NULL DEFAULT 100,
+          low_stock_alert INTEGER NOT NULL DEFAULT 10,
           created_at TEXT NOT NULL
         );
       `),
@@ -81,6 +85,10 @@ export async function ensureSchema(db: D1Database): Promise<void> {
           final_amount REAL NOT NULL,
           points_earned REAL NOT NULL DEFAULT 0,
           idempotency_key TEXT UNIQUE NOT NULL,
+          dining_type TEXT NOT NULL DEFAULT 'Dine-In',
+          table_number TEXT,
+          extra_discount REAL NOT NULL DEFAULT 0,
+          payment_method TEXT NOT NULL DEFAULT 'Cash/UPI',
           created_at TEXT NOT NULL,
           FOREIGN KEY (customer_id) REFERENCES customers(id),
           FOREIGN KEY (staff_id) REFERENCES users(id)
@@ -95,7 +103,21 @@ export async function ensureSchema(db: D1Database): Promise<void> {
           quantity INTEGER NOT NULL,
           unit_price REAL NOT NULL,
           total_price REAL NOT NULL,
+          notes TEXT,
           FOREIGN KEY (order_id) REFERENCES orders(id)
+        );
+      `),
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS draft_orders (
+          id TEXT PRIMARY KEY,
+          draft_number TEXT NOT NULL,
+          customer_id TEXT,
+          dining_type TEXT NOT NULL DEFAULT 'Dine-In',
+          table_number TEXT,
+          items_json TEXT NOT NULL,
+          notes TEXT,
+          created_by TEXT NOT NULL,
+          created_at TEXT NOT NULL
         );
       `),
       db.prepare(`
@@ -116,9 +138,36 @@ export async function ensureSchema(db: D1Database): Promise<void> {
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_nfc_cards_uid ON nfc_cards(card_uid);`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_points_ledger_customer ON points_ledger(customer_id);`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_draft_orders_created ON draft_orders(created_at);`),
     ]);
+
+    // Safe non-destructive column additions for existing tables
+    await Promise.all([
+      safeAddColumn(db, 'menu_items', 'image_url', 'TEXT'),
+      safeAddColumn(db, 'menu_items', 'stock_qty', 'INTEGER NOT NULL DEFAULT 100'),
+      safeAddColumn(db, 'menu_items', 'max_stock', 'INTEGER NOT NULL DEFAULT 100'),
+      safeAddColumn(db, 'menu_items', 'low_stock_alert', 'INTEGER NOT NULL DEFAULT 10'),
+      safeAddColumn(db, 'orders', 'dining_type', "TEXT NOT NULL DEFAULT 'Dine-In'"),
+      safeAddColumn(db, 'orders', 'table_number', 'TEXT'),
+      safeAddColumn(db, 'orders', 'extra_discount', 'REAL NOT NULL DEFAULT 0'),
+      safeAddColumn(db, 'orders', 'payment_method', "TEXT NOT NULL DEFAULT 'Cash/UPI'"),
+      safeAddColumn(db, 'order_items', 'notes', 'TEXT'),
+    ]);
+
     schemaEnsured = true;
   } catch (err) {
     console.error('ensureSchema execution error:', err);
+  }
+}
+
+async function safeAddColumn(db: D1Database, table: string, column: string, typeDef: string): Promise<void> {
+  try {
+    const tableInfo = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+    const hasColumn = tableInfo.results?.some((r) => r.name === column);
+    if (!hasColumn) {
+      await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${typeDef}`).run();
+    }
+  } catch (err) {
+    // Ignore if column already exists or table not ready
   }
 }

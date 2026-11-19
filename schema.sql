@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS menu_items (
   category TEXT NOT NULL,
   price REAL NOT NULL,
   is_available INTEGER NOT NULL DEFAULT 1,
+  image_url TEXT,
+  stock_qty INTEGER NOT NULL DEFAULT 100,
+  max_stock INTEGER NOT NULL DEFAULT 100,
+  low_stock_alert INTEGER NOT NULL DEFAULT 10,
   created_at TEXT NOT NULL
 );
 
@@ -76,6 +80,10 @@ CREATE TABLE IF NOT EXISTS orders (
   final_amount REAL NOT NULL,
   points_earned REAL NOT NULL DEFAULT 0,
   idempotency_key TEXT UNIQUE NOT NULL,
+  dining_type TEXT NOT NULL DEFAULT 'Dine-In',
+  table_number TEXT,
+  extra_discount REAL NOT NULL DEFAULT 0,
+  payment_method TEXT NOT NULL DEFAULT 'Cash/UPI',
   created_at TEXT NOT NULL,
   FOREIGN KEY (customer_id) REFERENCES customers(id),
   FOREIGN KEY (staff_id) REFERENCES users(id)
@@ -90,10 +98,24 @@ CREATE TABLE IF NOT EXISTS order_items (
   quantity INTEGER NOT NULL,
   unit_price REAL NOT NULL,
   total_price REAL NOT NULL,
+  notes TEXT,
   FOREIGN KEY (order_id) REFERENCES orders(id)
 );
 
--- 8. Points Ledger & Audit Trail
+-- 8. Draft Orders (Open Tables / Held Carts)
+CREATE TABLE IF NOT EXISTS draft_orders (
+  id TEXT PRIMARY KEY,
+  draft_number TEXT NOT NULL,
+  customer_id TEXT,
+  dining_type TEXT NOT NULL DEFAULT 'Dine-In',
+  table_number TEXT,
+  items_json TEXT NOT NULL,
+  notes TEXT,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- 9. Points Ledger & Audit Trail
 CREATE TABLE IF NOT EXISTS points_ledger (
   id TEXT PRIMARY KEY,
   customer_id TEXT NOT NULL,
@@ -112,3 +134,4 @@ CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
 CREATE INDEX IF NOT EXISTS idx_nfc_cards_uid ON nfc_cards(card_uid);
 CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_points_ledger_customer ON points_ledger(customer_id);
+CREATE INDEX IF NOT EXISTS idx_draft_orders_created ON draft_orders(created_at);

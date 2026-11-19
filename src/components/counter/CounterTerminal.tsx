@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Search,
   Radio,
@@ -9,21 +9,30 @@ import {
   Minus,
   CheckCircle2,
   AlertCircle,
-  Clock,
   Sparkles,
-  Receipt,
   X,
   UserPlus,
   MessageSquare,
   Gift,
   Smartphone,
   RefreshCw,
+  Printer,
+  Trash2,
+  Utensils,
+  Coffee,
+  ShoppingBag,
+  Truck,
+  Edit3,
+  BookmarkCheck,
+  Layers,
+  Percent,
 } from 'lucide-react';
 import { User as AuthUser } from '../../types';
 import { MenuItem } from '../../../functions/api/owner/menu';
 import { CafeSettingsRow } from '../../../functions/api/owner/settings';
 import { CardScanResult } from '../../../functions/api/counter/scan/[card_uid]';
-import { CheckoutReceipt } from '../../../functions/api/counter/checkout';
+import { CheckoutReceipt, CheckoutLineItem } from '../../../functions/api/counter/checkout';
+import { DraftOrderRow } from '../../../functions/api/counter/drafts';
 import { AddCustomerModal } from '../customers/AddCustomerModal';
 import { CustomerProfileView } from '../customers/CustomerProfileView';
 import { detectNfcCapabilities, normalizeCardInput } from '../../utils/nfcPlatform';
@@ -34,11 +43,17 @@ interface CounterTerminalProps {
   isOnline?: boolean;
 }
 
-interface CartItem {
-  menu_item_id?: string;
-  item_name: string;
-  quantity: number;
-  unit_price: number;
+interface CartItem extends CheckoutLineItem {
+  notes?: string;
+}
+
+interface KotTicket {
+  order_number: string;
+  dining_type: string;
+  table_number: string | null;
+  server_name: string;
+  items: CartItem[];
+  created_at: string;
 }
 
 export const CounterTerminal: React.FC<CounterTerminalProps> = ({
@@ -59,15 +74,27 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   const [searchResults, setSearchResults] = useState<any[]>([]);
 
   // Cross-platform NFC
-  const nfcCaps = detectNfcCapabilities();
+  const nfcCaps = useMemo(() => detectNfcCapabilities(), []);
   const [nfcListening, setNfcListening] = useState(false);
 
-  // Cart & Billing State
+  // Cart & POS Terminal State
   const [cart, setCart] = useState<CartItem[]>([]);
   const [menuSearch, setMenuSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [diningType, setDiningType] = useState<'dine_in' | 'takeaway' | 'delivery'>('dine_in');
+  const [tableNumber, setTableNumber] = useState('Table 1');
+  const [extraDiscount, setExtraDiscount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'upi' | 'card'>('cash');
   const [redeemPointsToggle, setRedeemPointsToggle] = useState(false);
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
+  const [expandedNoteIndex, setExpandedNoteIndex] = useState<number | null>(null);
   const [checkingOut, setCheckingOut] = useState(false);
+
+  // Drafts Management
+  const [draftsList, setDraftsList] = useState<DraftOrderRow[]>([]);
+  const [showDraftsDrawer, setShowDraftsDrawer] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [loadingDrafts, setLoadingDrafts] = useState(false);
 
   // Custom Item Modal
   const [showCustomItemModal, setShowCustomItemModal] = useState(false);
@@ -76,6 +103,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
 
   // Modals & Sub-views
   const [receipt, setReceipt] = useState<CheckoutReceipt | null>(null);
+  const [kotTicket, setKotTicket] = useState<KotTicket | null>(null);
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [selectedProfileCustomerId, setSelectedProfileCustomerId] = useState<string | null>(null);
   const [showBonusModal, setShowBonusModal] = useState(false);
@@ -96,7 +124,22 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // 1. Initial Load of Menu & Settings
+  // 1. Initial Load of Menu, Settings & Active Drafts
+  const fetchDrafts = async () => {
+    try {
+      setLoadingDrafts(true);
+      const res = await fetch('/api/counter/drafts');
+      if (res.ok) {
+        const data = (await res.json()) as DraftOrderRow[];
+        setDraftsList(data || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch drafts', err);
+    } finally {
+      setLoadingDrafts(false);
+    }
+  };
+
   useEffect(() => {
     const initCounter = async () => {
       try {
@@ -114,6 +157,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     };
 
     initCounter();
+    fetchDrafts();
   }, []);
 
   // 2. Auto-scan if initialCardUid is provided
@@ -291,7 +335,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     }
   };
 
-  // Cart operations
+  // Cart Operations
   const addToCart = (item: { id?: string; name: string; price: number }) => {
     setCart((prev) => {
       const existing = prev.find(
@@ -311,6 +355,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
           item_name: item.name,
           quantity: 1,
           unit_price: item.price,
+          notes: '',
         },
       ];
     });
@@ -328,6 +373,17 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     });
   };
 
+  const removeFromCart = (index: number) => {
+    setCart((prev) => prev.filter((_, idx) => idx !== index));
+    if (expandedNoteIndex === index) setExpandedNoteIndex(null);
+  };
+
+  const updateItemNotes = (index: number, notes: string) => {
+    setCart((prev) =>
+      prev.map((i, idx) => (idx === index ? { ...i, notes } : i))
+    );
+  };
+
   const handleAddCustomItem = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customName.trim() || !customPrice) return;
@@ -339,6 +395,9 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
 
   // Billing Calculations
   const subtotal = cart.reduce((acc, it) => acc + it.quantity * it.unit_price, 0);
+  const extraDiscountNum = Math.max(0, Number(extraDiscount) || 0);
+  const subtotalAfterExtra = Math.max(0, subtotal - extraDiscountNum);
+
   const pointRedeemValue = settings?.point_redeem_value ?? 1.0;
   const earnSpendUnit = settings?.earn_spend_unit ?? 100;
   const earnPointsPerUnit = settings?.earn_points_per_unit ?? 10;
@@ -351,23 +410,131 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   const canRedeem =
     redeemPointsToggle &&
     customerBalance > 0 &&
-    subtotal >= minBillForRedeem;
+    subtotalAfterExtra >= minBillForRedeem;
 
-  const maxDiscountRupees = subtotal * (maxRedeemPercent / 100);
+  const maxDiscountRupees = subtotalAfterExtra * (maxRedeemPercent / 100);
   const maxPointsPossible = Math.floor(maxDiscountRupees / pointRedeemValue);
   const pointsToRedeem = canRedeem ? Math.min(customerBalance, maxPointsPossible) : 0;
-  const discountAmount = Math.round(pointsToRedeem * pointRedeemValue * 100) / 100;
+  const pointsDiscountAmount = Math.round(pointsToRedeem * pointRedeemValue * 100) / 100;
 
-  const finalAmount = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
+  const finalAmount = Math.max(0, Math.round((subtotalAfterExtra - pointsDiscountAmount) * 100) / 100);
   const pointsToEarn =
     earnSpendUnit > 0
       ? Math.floor((finalAmount / earnSpendUnit) * earnPointsPerUnit)
       : 0;
 
+  // Save Draft (Hold Table Order)
+  const handleSaveDraft = async () => {
+    if (cart.length === 0) {
+      alert('Cannot save an empty order to drafts.');
+      return;
+    }
+
+    setSavingDraft(true);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/counter/drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: activeDraftId || undefined,
+          table_number: diningType === 'dine_in' ? tableNumber : diningType === 'takeaway' ? 'Takeaway' : 'Delivery',
+          dining_type: diningType,
+          customer_id: currentCustomer?.id || null,
+          items: cart,
+          notes: null,
+        }),
+      });
+
+      const data = (await res.json()) as { success?: boolean; draft?: DraftOrderRow; error?: string };
+      if (!res.ok) throw new Error(data.error || 'Failed to save draft order');
+
+      if (data.draft) {
+        setActiveDraftId(data.draft.id);
+        setSuccess(`Order saved as Draft #${data.draft.draft_number} (${data.draft.table_number || diningType})!`);
+        setTimeout(() => setSuccess(null), 3000);
+      }
+      await fetchDrafts();
+    } catch (err: any) {
+      setError(err.message || 'Failed to save draft order');
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  // Resume Draft into Active Terminal
+  const handleResumeDraft = (draft: DraftOrderRow) => {
+    setCart(draft.items || []);
+    setDiningType((draft.dining_type as any) || 'dine_in');
+    if (draft.table_number) setTableNumber(draft.table_number);
+    setActiveDraftId(draft.id);
+    setShowDraftsDrawer(false);
+
+    if (draft.customer_id) {
+      // Lookup customer
+      fetch(`/api/customers/${draft.customer_id}`)
+        .then((r) => r.json())
+        .then((data: any) => {
+          if (data.customer) {
+            setScanResult({
+              cardStatus: 'active',
+              card_uid: data.customer.card_uid || 'SAVED-DRAFT',
+              customer: data.customer,
+              crm: data.metrics,
+            });
+          }
+        })
+        .catch(console.error);
+    }
+
+    setSuccess(`Loaded Draft #${draft.draft_number} into Active Order.`);
+    setTimeout(() => setSuccess(null), 3000);
+  };
+
+  // Delete Draft
+  const handleDeleteDraft = async (draftId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to cancel and delete this draft order?')) return;
+
+    try {
+      const res = await fetch(`/api/counter/drafts/${draftId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete draft');
+      if (activeDraftId === draftId) setActiveDraftId(null);
+      await fetchDrafts();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete draft');
+    }
+  };
+
+  // Kitchen Order Ticket (KOT) Generator
+  const handleOpenKotModal = () => {
+    if (cart.length === 0) {
+      alert('Cart is empty. Add items before generating KOT.');
+      return;
+    }
+
+    setKotTicket({
+      order_number: activeDraftId
+        ? `DRAFT-${activeDraftId.slice(0, 6).toUpperCase()}`
+        : `KOT-${Date.now().toString().slice(-4)}`,
+      dining_type: diningType,
+      table_number: diningType === 'dine_in' ? tableNumber : null,
+      server_name: currentUser.name || currentUser.username,
+      items: [...cart],
+      created_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    });
+  };
+
+  // Trigger Print for KOT or Bill
+  const handlePrint = () => {
+    window.print();
+  };
+
   // Checkout Handler
   const handleCheckout = async () => {
     if (!currentCustomer) {
-      alert('Please select or scan a customer before completing the bill.');
+      alert('Please select, search, or scan a customer membership card before completing the bill.');
       return;
     }
     if (cart.length === 0 || subtotal <= 0) {
@@ -390,6 +557,11 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
           redeem_points: redeemPointsToggle,
           custom_redeem_points: pointsToRedeem,
           idempotency_key: idempotencyKey,
+          dining_type: diningType,
+          table_number: diningType === 'dine_in' ? tableNumber : undefined,
+          extra_discount: extraDiscountNum,
+          payment_method: paymentMethod,
+          draft_id: activeDraftId || undefined,
         }),
       });
 
@@ -398,6 +570,8 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
 
       if (data.receipt) {
         setReceipt(data.receipt);
+        setActiveDraftId(null);
+        await fetchDrafts();
         setScanResult((prev) =>
           prev && prev.customer
             ? {
@@ -422,9 +596,12 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   const handleNextCustomer = () => {
     setReceipt(null);
     setCart([]);
+    setExtraDiscount('');
     setRedeemPointsToggle(false);
     setScanResult(null);
     setScannedCardUid('');
+    setActiveDraftId(null);
+    setPaymentMethod('cash');
   };
 
   // Bonus points grant from CRM strip
@@ -509,7 +686,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
         </div>
       )}
 
-      {/* 1. TOP SCAN & LOOKUP BAR */}
+      {/* 1. TOP SCAN & NFC CARD LOOKUP BAR */}
       <div className="bg-white border border-[#E6E2DA] rounded-2xl p-4 shadow-sm">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-1">
@@ -535,7 +712,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
               >
                 <Smartphone className="w-4 h-4 text-[#111111] flex-shrink-0" />
                 <span className="hidden sm:inline font-serif">
-                  <strong>iPhone NFC Ready:</strong> Tap card to top edge.
+                  <strong>iPhone NFC:</strong> Tap card to top edge.
                 </span>
                 <span className="sm:hidden font-serif font-bold text-[11px]">
                   iPhone NFC Active
@@ -631,7 +808,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
         )}
       </div>
 
-      {/* 2. CARD STATE BANNERS */}
+      {/* 2. CARD STATE BANNERS (BLOCKED OR UNASSIGNED) */}
       {scanResult?.cardStatus === 'blocked' && (
         <div className="bg-[#FEF2F2] border border-[#FECACA] rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[#991B1B]">
           <div className="flex items-center gap-3">
@@ -699,148 +876,62 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
         </div>
       )}
 
-      {/* 3. LOADED CUSTOMER CRM STRIP */}
-      {currentCustomer ? (
-        <div className="bg-white border border-[#E6E2DA] rounded-2xl p-4 shadow-sm space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E6E2DA]">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-[#F3EFEA] text-[#111111] border border-[#E6E2DA] flex items-center justify-center font-bold">
-                <User className="w-5 h-5 text-[#111111]" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-[#111111] text-base font-serif">{currentCustomer.name}</h3>
-                  <span className="text-xs font-mono text-[#52525B] tabular-nums">{currentCustomer.phone}</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-[#71717A] mt-0.5">
-                  <span className="font-mono text-[#111111] bg-[#F3EFEA] border border-[#E6E2DA] px-1.5 py-0.5 rounded text-[11px] tabular-nums">
-                    {scanResult?.card_uid || 'No Card'}
-                  </span>
-                  <span>&bull;</span>
-                  <span className="tabular-nums">{currentCustomer.total_visits} visits</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Points Balance Pill & CRM actions */}
-            <div className="flex items-center gap-2 self-end sm:self-auto">
-              <div className="bg-[#FAF9F6] border border-[#E6E2DA] px-3.5 py-1.5 rounded-xl text-right">
-                <p className="text-[10px] text-[#71717A] uppercase font-bold tracking-wider">Balance</p>
-                <p className="text-sm font-mono font-bold text-[#166534] tabular-nums">
-                  {currentCustomer.points_balance} pts{' '}
-                  <span className="text-[11px] text-[#52525B]">
-                    (₹{(currentCustomer.points_balance * pointRedeemValue).toFixed(1)})
-                  </span>
-                </p>
-              </div>
-
-              <button
-                onClick={() => {
-                  setShowBonusModal(true);
-                  setBonusPoints('');
-                  setBonusReason('');
-                }}
-                title="Give courtesy points"
-                className="min-h-[38px] min-w-[38px] p-2 bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] rounded-xl border border-[#E6E2DA] transition-colors cursor-pointer flex items-center justify-center"
-              >
-                <Gift className="w-4 h-4" />
-              </button>
-
-              <button
-                onClick={() => setSelectedProfileCustomerId(currentCustomer.id)}
-                className="min-h-[38px] px-3.5 py-2 bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] rounded-xl text-xs font-bold border border-[#E6E2DA] transition-colors cursor-pointer"
-              >
-                Full Profile
-              </button>
-            </div>
-          </div>
-
-          {/* CRM Insights summary */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-            {/* Last Order Preview */}
-            <div className="bg-[#FAF9F6] p-2.5 rounded-xl border border-[#E6E2DA] flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Clock className="w-3.5 h-3.5 text-[#52525B] flex-shrink-0" />
-                <span className="text-[#71717A] uppercase text-[11px] font-bold">Last Order:</span>
-                <span className="font-semibold text-[#111111] truncate max-w-[180px]">
-                  {scanResult?.crm?.last_order
-                    ? scanResult.crm.last_order.items.map((i) => `${i.quantity}x ${i.item_name}`).join(', ')
-                    : 'First-time customer'}
-                </span>
-              </div>
-              {scanResult?.crm?.last_order && (
-                <span className="font-mono text-[#111111] font-bold tabular-nums">
-                  ₹{scanResult.crm.last_order.final_amount}
-                </span>
-              )}
-            </div>
-
-            {/* Top Favorites */}
-            <div className="bg-[#FAF9F6] p-2.5 rounded-xl border border-[#E6E2DA] flex items-center gap-2 overflow-x-auto">
-              <Sparkles className="w-3.5 h-3.5 text-[#166534] flex-shrink-0" />
-              <span className="text-[#71717A] uppercase text-[11px] font-bold whitespace-nowrap">Favorites:</span>
-              {scanResult?.crm?.most_ordered_items && scanResult.crm.most_ordered_items.length > 0 ? (
-                scanResult.crm.most_ordered_items.map((fav) => (
-                  <span
-                    key={fav.item_name}
-                    className="bg-white border border-[#E6E2DA] text-[11px] font-semibold text-[#111111] px-2 py-0.5 rounded-md whitespace-nowrap shadow-2xs"
-                  >
-                    {fav.item_name}
-                  </span>
-                ))
-              ) : (
-                <span className="text-[#71717A] italic">No favorites yet</span>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-white border border-[#E6E2DA] border-dashed rounded-2xl p-4 text-center text-xs text-[#52525B]">
-          <p>
-            No customer selected. Tap an NFC card, search a phone/name above, or{' '}
-            <button
-              onClick={() => setShowAddCustomerModal(true)}
-              className="text-[#111111] font-bold underline cursor-pointer hover:text-[#52525B]"
-            >
-              register a walk-in customer
-            </button>
-            .
-          </p>
-        </div>
-      )}
-
-      {/* 4. 10-SECOND ITEMIZE MENU BILLING PANEL */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Menu Catalog (2 cols on large screen) */}
-        <div className="lg:col-span-2 bg-white border border-[#E6E2DA] rounded-2xl p-4 shadow-sm space-y-3">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+      {/* 3. SPLIT-PANE FULL POINT OF SALE (POS) TERMINAL */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* LEFT COLUMN: VISUAL PRODUCT CATALOG (7 Cols) */}
+        <div className="lg:col-span-7 bg-white border border-[#E6E2DA] rounded-2xl p-4 sm:p-5 shadow-sm space-y-4">
+          {/* Top Bar: Search, Drafts Badge & Custom Item */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
             <div className="relative flex-1">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-[#71717A]" />
+              <Search className="w-4 h-4 absolute left-3 top-3 text-[#71717A]" />
               <input
                 type="text"
-                placeholder="Search menu catalog..."
+                placeholder="Search menu items or categories..."
                 value={menuSearch}
                 onChange={(e) => setMenuSearch(e.target.value)}
-                className="w-full min-h-[40px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl pl-8 pr-3 py-1.5 text-xs text-[#111111] placeholder-[#71717A] focus:outline-none focus:border-[#111111] focus:bg-white transition-colors"
+                className="w-full min-h-[42px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl pl-9 pr-3 py-2 text-xs text-[#111111] placeholder-[#71717A] focus:outline-none focus:border-[#111111] focus:bg-white transition-colors"
               />
             </div>
 
-            <button
-              onClick={() => setShowCustomItemModal(true)}
-              className="min-h-[40px] px-3.5 py-1.5 bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] rounded-xl text-xs font-bold border border-[#E6E2DA] flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Custom Item</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Drafts Drawer Trigger Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  fetchDrafts();
+                  setShowDraftsDrawer(true);
+                }}
+                className="min-h-[42px] px-3.5 py-2 bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] rounded-xl text-xs font-bold border border-[#E6E2DA] flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
+              >
+                <Layers className="w-4 h-4 text-[#111111]" />
+                <span>Drafts</span>
+                {draftsList.length > 0 && (
+                  <span className="bg-[#111111] text-white text-[10px] px-1.5 py-0.2 rounded-full font-mono tabular-nums">
+                    {draftsList.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Custom Item Button */}
+              <button
+                type="button"
+                onClick={() => setShowCustomItemModal(true)}
+                className="min-h-[42px] px-3.5 py-2 bg-[#111111] hover:bg-[#262626] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors shadow-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Custom Item</span>
+              </button>
+            </div>
           </div>
 
-          {/* Category Chips */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+          {/* Category Filter Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
             {categories.map((cat) => (
               <button
                 key={cat}
+                type="button"
                 onClick={() => setSelectedCategory(cat)}
-                className={`min-h-[34px] px-3 py-1 rounded-lg font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                className={`min-h-[34px] px-3.5 py-1.5 rounded-xl font-semibold transition-all whitespace-nowrap cursor-pointer ${
                   selectedCategory === cat
                     ? 'bg-[#111111] text-white shadow-xs'
                     : 'bg-[#F3EFEA] text-[#52525B] hover:text-[#111111] border border-[#E6E2DA]'
@@ -851,211 +942,868 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
             ))}
           </div>
 
-          {/* Menu Items Grid */}
+          {/* Product Cards Grid */}
           {loadingInit ? (
-            <div className="p-8 text-center text-[#71717A] text-xs">Loading menu items...</div>
+            <div className="py-20 text-center text-[#71717A] text-xs font-serif">
+              Loading menu catalog...
+            </div>
           ) : filteredMenuItems.length === 0 ? (
-            <div className="p-8 text-center text-[#71717A] text-xs italic">
-              No matching menu items found.
+            <div className="py-20 text-center text-[#71717A] text-xs italic font-serif">
+              No matching items found in "{selectedCategory}".
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[380px] overflow-y-auto pr-1">
-              {filteredMenuItems.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => addToCart({ id: item.id, name: item.name, price: item.price })}
-                  className="min-h-[72px] bg-[#FAF9F6] hover:bg-white border border-[#E6E2DA] hover:border-[#111111] rounded-xl p-3 text-left transition-all flex flex-col justify-between group shadow-2xs cursor-pointer"
-                >
-                  <div>
-                    <h4 className="font-semibold text-[#111111] text-xs line-clamp-2 leading-tight group-hover:text-[#111111]">
-                      {item.name}
-                    </h4>
-                    <span className="text-[10px] text-[#71717A] uppercase tracking-wider">{item.category}</span>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[560px] overflow-y-auto pr-1">
+              {filteredMenuItems.map((item) => {
+                const stockQty = item.stock_qty ?? 100;
+                const lowAlert = item.low_stock_alert ?? 10;
+                const isOutOfStock = stockQty <= 0;
+                const isLowStock = !isOutOfStock && stockQty <= lowAlert;
+
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => {
+                      if (!isOutOfStock) {
+                        addToCart({ id: item.id, name: item.name, price: item.price });
+                      }
+                    }}
+                    className={`group bg-[#FAF9F6] border border-[#E6E2DA] hover:border-[#111111] rounded-2xl p-3 flex flex-col justify-between transition-all shadow-2xs text-left cursor-pointer ${
+                      isOutOfStock ? 'opacity-60 cursor-not-allowed bg-[#F4F4F5]' : 'hover:bg-white hover:shadow-xs'
+                    }`}
+                  >
+                    <div>
+                      {/* Product Visual / Placeholder */}
+                      <div className="w-full h-24 mb-2.5 rounded-xl bg-[#F3EFEA] border border-[#E6E2DA] overflow-hidden flex items-center justify-center relative">
+                        {item.image_url ? (
+                          <img
+                            src={item.image_url}
+                            alt={item.name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            onError={(e) => {
+                              // Fallback on broken image
+                              (e.target as HTMLElement).style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <Coffee className="w-8 h-8 text-[#71717A]/40 group-hover:text-[#111111]/70 transition-colors" />
+                        )}
+
+                        {/* Stock Tag Overlay */}
+                        <div className="absolute top-1.5 right-1.5">
+                          {isOutOfStock ? (
+                            <span className="text-[10px] bg-[#FEE2E2] text-[#991B1B] font-bold px-1.5 py-0.5 rounded-md border border-[#FECACA]">
+                              Out of stock
+                            </span>
+                          ) : isLowStock ? (
+                            <span className="text-[10px] bg-[#FEF3C7] text-[#92400E] font-bold px-1.5 py-0.5 rounded-md border border-[#FDE68A] tabular-nums">
+                              Low: {stockQty}
+                            </span>
+                          ) : (
+                            <span className="text-[9px] bg-white/90 text-[#166534] font-semibold px-1.5 py-0.5 rounded-md border border-[#E6E2DA] tabular-nums">
+                              {stockQty} in stock
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Name & Category */}
+                      <h4 className="font-bold text-[#111111] text-xs leading-snug line-clamp-2 font-serif group-hover:text-[#111111]">
+                        {item.name}
+                      </h4>
+                      <p className="text-[10px] text-[#71717A] uppercase tracking-wider mt-0.5">
+                        {item.category}
+                      </p>
+                    </div>
+
+                    {/* Price & Quick Add Button */}
+                    <div className="flex items-center justify-between mt-3 pt-2 border-t border-[#E6E2DA]">
+                      <span className="font-mono font-bold text-[#111111] text-sm tabular-nums">
+                        ₹{item.price}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={isOutOfStock}
+                        className="w-7 h-7 rounded-lg bg-[#F3EFEA] text-[#111111] group-hover:bg-[#111111] group-hover:text-white flex items-center justify-center text-xs font-bold transition-colors cursor-pointer disabled:opacity-40"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between mt-2 pt-1 border-t border-[#E6E2DA]">
-                    <span className="font-mono font-bold text-[#111111] text-xs tabular-nums">
-                      ₹{item.price}
-                    </span>
-                    <span className="w-5 h-5 rounded-md bg-[#E6E2DA] text-[#111111] group-hover:bg-[#111111] group-hover:text-white flex items-center justify-center text-xs font-bold transition-colors">
-                      +
-                    </span>
-                  </div>
-                </button>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
 
-        {/* Live Cart & Checkout (1 col) */}
-        <div className="bg-white border border-[#E6E2DA] rounded-2xl p-4 shadow-sm flex flex-col justify-between space-y-3">
-          <div>
-            <div className="flex items-center justify-between pb-2 border-b border-[#E6E2DA]">
-              <div className="flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-[#111111]" />
-                <h3 className="font-bold text-[#111111] text-sm font-serif">Active Order Cart</h3>
-              </div>
-              <span className="text-xs bg-[#F3EFEA] border border-[#E6E2DA] text-[#111111] px-2 py-0.5 rounded-full font-mono font-bold tabular-nums">
-                {cart.reduce((a, b) => a + b.quantity, 0)} items
-              </span>
-            </div>
-
-            {/* Cart Line Items */}
-            <div className="divide-y divide-[#E6E2DA] max-h-56 overflow-y-auto my-2">
-              {cart.length === 0 ? (
-                <div className="py-12 text-center text-[#71717A] text-xs italic">
-                  Tap menu items to add to order
-                </div>
-              ) : (
-                cart.map((item, idx) => (
-                  <div key={idx} className="py-2.5 flex items-center justify-between text-xs">
-                    <div className="flex-1 pr-2">
-                      <p className="font-semibold text-[#111111] truncate">{item.item_name}</p>
-                      <p className="font-mono text-[#52525B] text-[11px] tabular-nums">
-                        ₹{item.unit_price} x {item.quantity} = ₹{item.unit_price * item.quantity}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => updateQuantity(idx, -1)}
-                        className="w-7 h-7 rounded-lg bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] flex items-center justify-center font-bold border border-[#E6E2DA] cursor-pointer"
-                      >
-                        <Minus className="w-3 h-3" />
-                      </button>
-                      <span className="font-mono font-bold text-[#111111] w-4 text-center tabular-nums">
-                        {item.quantity}
-                      </span>
-                      <button
-                        onClick={() => updateQuantity(idx, 1)}
-                        className="w-7 h-7 rounded-lg bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] flex items-center justify-center font-bold border border-[#E6E2DA] cursor-pointer"
-                      >
-                        <Plus className="w-3 h-3" />
-                      </button>
-                    </div>
+        {/* RIGHT COLUMN: ACTIVE ORDER, CRM & BILLING SUMMARY (5 Cols) */}
+        <div className="lg:col-span-5 space-y-4">
+          {/* Customer CRM Strip (Compact) */}
+          {currentCustomer ? (
+            <div className="bg-white border border-[#E6E2DA] rounded-2xl p-4 shadow-sm space-y-2.5">
+              <div className="flex items-center justify-between pb-2 border-b border-[#E6E2DA]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-[#F3EFEA] text-[#111111] border border-[#E6E2DA] flex items-center justify-center font-bold">
+                    <User className="w-4 h-4 text-[#111111]" />
                   </div>
-                ))
+                  <div>
+                    <h3 className="font-bold text-[#111111] text-sm font-serif leading-tight">
+                      {currentCustomer.name}
+                    </h3>
+                    <p className="text-[11px] font-mono text-[#52525B] tabular-nums mt-0.5">
+                      {currentCustomer.phone} &bull; Card:{' '}
+                      <span className="text-[#111111] font-semibold">{scanResult?.card_uid || 'NONE'}</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Points Pill */}
+                <div className="bg-[#FAF9F6] border border-[#E6E2DA] px-2.5 py-1 rounded-xl text-right">
+                  <p className="text-[9px] text-[#71717A] uppercase font-bold tracking-wider">Points</p>
+                  <p className="text-xs font-mono font-bold text-[#166534] tabular-nums">
+                    {currentCustomer.points_balance} pts
+                  </p>
+                </div>
+              </div>
+
+              {/* CRM Insights & Quick Actions */}
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-1.5 text-[11px] text-[#52525B] truncate">
+                  <Sparkles className="w-3.5 h-3.5 text-[#166534] flex-shrink-0" />
+                  <span className="truncate">
+                    {scanResult?.crm?.most_ordered_items?.[0]
+                      ? `Fav: ${scanResult.crm.most_ordered_items[0].item_name}`
+                      : `${currentCustomer.total_visits} total visits`}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowBonusModal(true);
+                      setBonusPoints('');
+                      setBonusReason('');
+                    }}
+                    title="Give courtesy points"
+                    className="p-1.5 bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] rounded-lg border border-[#E6E2DA] transition-colors cursor-pointer"
+                  >
+                    <Gift className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedProfileCustomerId(currentCustomer.id)}
+                    className="px-2 py-1 bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] rounded-lg text-[11px] font-bold border border-[#E6E2DA] transition-colors cursor-pointer"
+                  >
+                    Profile
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScanResult(null);
+                      setScannedCardUid('');
+                    }}
+                    title="Unlink current customer from this order"
+                    className="p-1.5 text-[#71717A] hover:text-[#991B1B] hover:bg-[#FEE2E2] rounded-lg transition-colors cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white border border-[#E6E2DA] border-dashed rounded-2xl p-3.5 text-center text-xs text-[#52525B] flex items-center justify-between gap-2 shadow-2xs">
+              <span className="font-serif">No customer attached. Tap card or search above.</span>
+              <button
+                type="button"
+                onClick={() => setShowAddCustomerModal(true)}
+                className="px-2.5 py-1.5 bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] rounded-xl text-xs font-bold border border-[#E6E2DA] flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>+ Register</span>
+              </button>
+            </div>
+          )}
+
+          {/* Main Active Order Card */}
+          <div className="bg-white border border-[#E6E2DA] rounded-2xl p-4 sm:p-5 shadow-sm space-y-4">
+            {/* Dining Type & Table Selector */}
+            <div className="space-y-2 pb-3 border-b border-[#E6E2DA]">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#52525B] uppercase tracking-wider font-serif">
+                  Dining Mode
+                </span>
+                {activeDraftId && (
+                  <span className="text-[10px] bg-[#FFFBEB] text-[#92400E] border border-[#FDE68A] px-2 py-0.5 rounded-full font-mono font-bold">
+                    Editing Draft #{activeDraftId.slice(0, 6)}
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setDiningType('dine_in')}
+                  className={`min-h-[36px] py-1.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    diningType === 'dine_in'
+                      ? 'bg-[#111111] text-white shadow-xs'
+                      : 'bg-[#F3EFEA] text-[#52525B] hover:text-[#111111] border border-[#E6E2DA]'
+                  }`}
+                >
+                  <Utensils className="w-3.5 h-3.5" />
+                  <span>Dine-In</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDiningType('takeaway')}
+                  className={`min-h-[36px] py-1.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    diningType === 'takeaway'
+                      ? 'bg-[#111111] text-white shadow-xs'
+                      : 'bg-[#F3EFEA] text-[#52525B] hover:text-[#111111] border border-[#E6E2DA]'
+                  }`}
+                >
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  <span>Takeaway</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDiningType('delivery')}
+                  className={`min-h-[36px] py-1.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    diningType === 'delivery'
+                      ? 'bg-[#111111] text-white shadow-xs'
+                      : 'bg-[#F3EFEA] text-[#52525B] hover:text-[#111111] border border-[#E6E2DA]'
+                  }`}
+                >
+                  <Truck className="w-3.5 h-3.5" />
+                  <span>Delivery</span>
+                </button>
+              </div>
+
+              {/* Table Selector Dropdown (Shown for Dine-In) */}
+              {diningType === 'dine_in' && (
+                <div className="flex items-center gap-2 pt-1">
+                  <label className="text-xs font-semibold text-[#52525B] whitespace-nowrap">
+                    Table:
+                  </label>
+                  <select
+                    value={tableNumber}
+                    onChange={(e) => setTableNumber(e.target.value)}
+                    className="flex-1 min-h-[36px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-3 py-1 text-xs text-[#111111] font-serif focus:outline-none focus:border-[#111111] focus:bg-white"
+                  >
+                    {[
+                      'Table 1',
+                      'Table 2',
+                      'Table 3',
+                      'Table 4',
+                      'Table 5',
+                      'Table 6',
+                      'Table 7',
+                      'Table 8',
+                      'Table 9',
+                      'Table 10',
+                      'Table 11',
+                      'Table 12',
+                      'Balcony 1',
+                      'Balcony 2',
+                      'Garden Patio',
+                      'Bar Counter',
+                    ].map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
             </div>
-          </div>
 
-          {/* Pricing & Checkout Summary Box */}
-          <div className="bg-[#FAF9F6] p-3.5 rounded-xl border border-[#E6E2DA] space-y-2.5">
-            <div className="flex justify-between text-xs text-[#52525B]">
-              <span>Subtotal:</span>
-              <span className="font-mono text-[#111111] font-bold tabular-nums">₹{subtotal}</span>
-            </div>
-
-            {/* Points Redemption Toggle */}
-            <div className="flex items-center justify-between pt-2 border-t border-[#E6E2DA]">
-              <div>
-                <p className="text-xs font-semibold text-[#111111] flex items-center gap-1">
-                  <Coins className="w-3.5 h-3.5 text-[#166534]" />
-                  <span>Redeem Points</span>
-                </p>
-                <p className="text-[10px] text-[#71717A] tabular-nums">
-                  {customerBalance > 0
-                    ? `Avail: ${customerBalance} pts (max ₹${maxDiscountRupees.toFixed(0)})`
-                    : 'No points available'}
-                </p>
+            {/* Cart Line Items List */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#52525B] uppercase tracking-wider font-serif">
+                  Order Items ({cart.reduce((a, b) => a + b.quantity, 0)})
+                </span>
+                {cart.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm('Clear entire cart?')) setCart([]);
+                    }}
+                    className="text-[11px] text-[#71717A] hover:text-[#991B1B] font-semibold cursor-pointer"
+                  >
+                    Clear All
+                  </button>
+                )}
               </div>
 
-              <input
-                type="checkbox"
-                disabled={!currentCustomer || customerBalance <= 0 || subtotal < minBillForRedeem}
-                checked={redeemPointsToggle}
-                onChange={(e) => setRedeemPointsToggle(e.target.checked)}
-                className="w-4 h-4 rounded text-[#111111] accent-[#111111] border-[#E6E2DA] cursor-pointer"
-              />
-            </div>
+              <div className="divide-y divide-[#E6E2DA] max-h-56 overflow-y-auto pr-1">
+                {cart.length === 0 ? (
+                  <div className="py-10 text-center text-[#71717A] text-xs italic font-serif">
+                    Tap items from catalog to build order
+                  </div>
+                ) : (
+                  cart.map((item, idx) => (
+                    <div key={idx} className="py-2.5 space-y-1 text-xs">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 pr-1">
+                          <p className="font-bold text-[#111111] font-serif leading-tight">
+                            {item.item_name}
+                          </p>
+                          <p className="font-mono text-[#52525B] text-[11px] tabular-nums mt-0.5">
+                            ₹{item.unit_price} &times; {item.quantity} ={' '}
+                            <span className="font-bold text-[#111111]">
+                              ₹{item.unit_price * item.quantity}
+                            </span>
+                          </p>
+                        </div>
 
-            {redeemPointsToggle && discountAmount > 0 && (
-              <div className="flex justify-between text-xs text-[#166534] font-semibold">
-                <span>Loyalty Discount ({pointsToRedeem} pts):</span>
-                <span className="font-mono tabular-nums">-₹{discountAmount.toFixed(1)}</span>
+                        {/* Stepper & Delete */}
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => updateQuantity(idx, -1)}
+                            className="w-7 h-7 rounded-lg bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] flex items-center justify-center font-bold border border-[#E6E2DA] cursor-pointer"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="font-mono font-bold text-[#111111] w-5 text-center tabular-nums">
+                            {item.quantity}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => updateQuantity(idx, 1)}
+                            className="w-7 h-7 rounded-lg bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] flex items-center justify-center font-bold border border-[#E6E2DA] cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeFromCart(idx)}
+                            className="w-7 h-7 rounded-lg text-[#71717A] hover:text-[#991B1B] hover:bg-[#FEE2E2] flex items-center justify-center cursor-pointer ml-1"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Note Toggle & Input */}
+                      <div>
+                        {expandedNoteIndex === idx ? (
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <input
+                              type="text"
+                              value={item.notes || ''}
+                              onChange={(e) => updateItemNotes(idx, e.target.value)}
+                              placeholder="Special note (e.g. Less sugar, extra hot)..."
+                              className="w-full text-xs bg-[#FAF9F6] border border-[#E6E2DA] rounded-lg px-2.5 py-1 text-[#111111] focus:outline-none focus:border-[#111111]"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setExpandedNoteIndex(null)}
+                              className="text-[11px] font-bold text-[#111111] bg-[#F3EFEA] border border-[#E6E2DA] px-2 py-1 rounded-lg cursor-pointer"
+                            >
+                              Done
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedNoteIndex(idx)}
+                            className="text-[11px] text-[#71717A] hover:text-[#111111] flex items-center gap-1 cursor-pointer font-serif"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>
+                              {item.notes ? (
+                                <strong className="text-[#111111]">Note: {item.notes}</strong>
+                              ) : (
+                                '+ Add item instruction / note'
+                              )}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
-            )}
-
-            <div className="flex justify-between items-baseline pt-2 border-t border-[#E6E2DA]">
-              <span className="text-sm font-bold text-[#111111] font-serif">Final Amount:</span>
-              <span className="text-xl font-bold font-mono text-[#111111] tabular-nums">₹{finalAmount}</span>
             </div>
 
-            <div className="flex justify-between items-center text-[11px] text-[#166534] bg-[#ECFDF5] px-2.5 py-1 rounded-lg border border-[#BBF7D0]">
-              <span>Points to Earn:</span>
-              <span className="font-mono font-bold tabular-nums">+{pointsToEarn} pts</span>
+            {/* Bill Summary & Calculations Box */}
+            <div className="bg-[#FAF9F6] p-3.5 rounded-xl border border-[#E6E2DA] space-y-2 text-xs">
+              {/* Subtotal */}
+              <div className="flex justify-between text-[#52525B]">
+                <span>Subtotal:</span>
+                <span className="font-mono text-[#111111] font-bold tabular-nums">₹{subtotal}</span>
+              </div>
+
+              {/* Extra Custom Discount Row */}
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[#52525B] flex items-center gap-1">
+                  <Percent className="w-3.5 h-3.5 text-[#52525B]" />
+                  <span>Extra Discount:</span>
+                </span>
+                <div className="flex items-center gap-1">
+                  <span className="text-[#71717A] font-mono">₹</span>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={extraDiscount}
+                    onChange={(e) => setExtraDiscount(e.target.value)}
+                    className="w-16 bg-white border border-[#E6E2DA] rounded-lg px-2 py-0.5 text-xs text-right font-mono tabular-nums focus:outline-none focus:border-[#111111]"
+                  />
+                </div>
+              </div>
+
+              {/* Loyalty Points Redemption Toggle */}
+              <div className="flex items-center justify-between pt-2 border-t border-[#E6E2DA]">
+                <div>
+                  <p className="font-bold text-[#111111] flex items-center gap-1">
+                    <Coins className="w-3.5 h-3.5 text-[#166534]" />
+                    <span>Redeem Loyalty Points</span>
+                  </p>
+                  <p className="text-[10px] text-[#71717A] tabular-nums">
+                    {customerBalance > 0
+                      ? `Avail: ${customerBalance} pts (max ₹${maxDiscountRupees.toFixed(0)})`
+                      : 'No customer points available'}
+                  </p>
+                </div>
+
+                <input
+                  type="checkbox"
+                  disabled={!currentCustomer || customerBalance <= 0 || subtotalAfterExtra < minBillForRedeem}
+                  checked={redeemPointsToggle}
+                  onChange={(e) => setRedeemPointsToggle(e.target.checked)}
+                  className="w-4 h-4 rounded text-[#111111] accent-[#111111] border-[#E6E2DA] cursor-pointer"
+                />
+              </div>
+
+              {redeemPointsToggle && pointsDiscountAmount > 0 && (
+                <div className="flex justify-between text-[#166534] font-semibold">
+                  <span>Loyalty Discount ({pointsToRedeem} pts):</span>
+                  <span className="font-mono tabular-nums">-₹{pointsDiscountAmount.toFixed(1)}</span>
+                </div>
+              )}
+
+              {/* Payment Method Selector */}
+              <div className="pt-2 border-t border-[#E6E2DA] space-y-1">
+                <span className="text-[11px] font-bold text-[#52525B] uppercase tracking-wider">
+                  Payment Method
+                </span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('cash')}
+                    className={`py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      paymentMethod === 'cash'
+                        ? 'bg-[#111111] text-white'
+                        : 'bg-white text-[#52525B] hover:text-[#111111] border border-[#E6E2DA]'
+                    }`}
+                  >
+                    Cash
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('upi')}
+                    className={`py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      paymentMethod === 'upi'
+                        ? 'bg-[#111111] text-white'
+                        : 'bg-white text-[#52525B] hover:text-[#111111] border border-[#E6E2DA]'
+                    }`}
+                  >
+                    UPI / QR
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('card')}
+                    className={`py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      paymentMethod === 'card'
+                        ? 'bg-[#111111] text-white'
+                        : 'bg-white text-[#52525B] hover:text-[#111111] border border-[#E6E2DA]'
+                    }`}
+                  >
+                    Card
+                  </button>
+                </div>
+              </div>
+
+              {/* Grand Total */}
+              <div className="flex justify-between items-baseline pt-2 border-t border-[#E6E2DA]">
+                <span className="text-sm font-bold text-[#111111] font-serif">Net Payable:</span>
+                <span className="text-xl font-bold font-mono text-[#111111] tabular-nums">
+                  ₹{finalAmount}
+                </span>
+              </div>
+
+              {/* Points to Earn Badge */}
+              <div className="flex justify-between items-center text-[11px] text-[#166534] bg-[#ECFDF5] px-2.5 py-1 rounded-lg border border-[#BBF7D0]">
+                <span>Points to Earn on Bill:</span>
+                <span className="font-mono font-bold tabular-nums">+{pointsToEarn} pts</span>
+              </div>
             </div>
 
-            {/* Complete Bill Action */}
-            <button
-              onClick={handleCheckout}
-              disabled={!isOnline || checkingOut || cart.length === 0 || !currentCustomer}
-              className="w-full min-h-[46px] mt-2 bg-[#111111] hover:bg-[#262626] disabled:opacity-50 text-white font-bold py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>
-                {!isOnline
-                  ? 'Offline Mode — Billing Disabled'
-                  : checkingOut
-                  ? 'Processing Checkout...'
-                  : 'Confirm & Complete Bill'}
-              </span>
-            </button>
+            {/* Action Buttons: Hold Draft, KOT & Print, Confirm & Bill */}
+            <div className="space-y-2 pt-1">
+              <div className="grid grid-cols-2 gap-2">
+                {/* Hold / Draft Button */}
+                <button
+                  type="button"
+                  onClick={handleSaveDraft}
+                  disabled={savingDraft || cart.length === 0}
+                  className="min-h-[42px] px-3 py-2 bg-[#F3EFEA] hover:bg-[#E6E2DA] disabled:opacity-50 text-[#111111] rounded-xl text-xs font-bold border border-[#E6E2DA] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <BookmarkCheck className="w-4 h-4 text-[#111111]" />
+                  <span>{savingDraft ? 'Saving...' : 'Hold / Draft'}</span>
+                </button>
+
+                {/* KOT & Print Button */}
+                <button
+                  type="button"
+                  onClick={handleOpenKotModal}
+                  disabled={cart.length === 0}
+                  className="min-h-[42px] px-3 py-2 bg-[#F3EFEA] hover:bg-[#E6E2DA] disabled:opacity-50 text-[#111111] rounded-xl text-xs font-bold border border-[#E6E2DA] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-[#111111]" />
+                  <span>KOT &amp; Print</span>
+                </button>
+              </div>
+
+              {/* Complete Bill Action */}
+              <button
+                type="button"
+                onClick={handleCheckout}
+                disabled={!isOnline || checkingOut || cart.length === 0 || !currentCustomer}
+                className="w-full min-h-[46px] bg-[#111111] hover:bg-[#262626] disabled:opacity-50 text-white font-bold py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>
+                  {!isOnline
+                    ? 'Offline Mode — Billing Disabled'
+                    : checkingOut
+                    ? 'Processing Checkout...'
+                    : 'Confirm & Complete Bill'}
+                </span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* 5. ORDER RECEIPT MODAL */}
+      {/* 4. DRAFTS DRAWER / MODAL */}
+      {showDraftsDrawer && (
+        <div className="fixed inset-0 z-50 bg-[#111111]/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="max-w-lg w-full bg-white border border-[#E6E2DA] rounded-2xl p-6 shadow-xl space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E6E2DA]">
+              <div className="flex items-center gap-2">
+                <Layers className="w-5 h-5 text-[#111111]" />
+                <h3 className="font-bold text-[#111111] text-base font-serif">
+                  Held Draft Orders &amp; Active Tables
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDraftsDrawer(false)}
+                className="text-[#71717A] hover:text-[#111111] p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto divide-y divide-[#E6E2DA] pr-1">
+              {loadingDrafts ? (
+                <div className="py-12 text-center text-xs text-[#71717A]">Loading drafts...</div>
+              ) : draftsList.length === 0 ? (
+                <div className="py-12 text-center text-xs text-[#71717A] italic font-serif">
+                  No active held orders or tables. Use "Hold / Draft" in the terminal to save an order.
+                </div>
+              ) : (
+                draftsList.map((draft) => {
+                  const draftSubtotal = (draft.items || []).reduce(
+                    (acc, it) => acc + it.quantity * it.unit_price,
+                    0
+                  );
+                  return (
+                    <div
+                      key={draft.id}
+                      onClick={() => handleResumeDraft(draft)}
+                      className="py-3.5 hover:bg-[#F3EFEA] rounded-xl px-2.5 cursor-pointer flex items-center justify-between text-xs transition-colors group"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-[#111111] text-sm font-serif">
+                            {draft.table_number || draft.dining_type.toUpperCase()}
+                          </span>
+                          <span className="font-mono text-[10px] bg-white border border-[#E6E2DA] px-1.5 py-0.5 rounded text-[#52525B]">
+                            #{draft.draft_number}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#52525B]">
+                          {draft.customer_name ? (
+                            <strong className="text-[#111111]">{draft.customer_name}</strong>
+                          ) : (
+                            'Walk-in / Unassigned'
+                          )}{' '}
+                          &bull; {(draft.items || []).length} items
+                        </p>
+                        <p className="text-[10px] text-[#71717A] truncate max-w-xs">
+                          {(draft.items || []).map((i) => `${i.quantity}x ${i.item_name}`).join(', ')}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <p className="font-mono font-bold text-[#111111] text-sm tabular-nums">
+                            ₹{draftSubtotal}
+                          </p>
+                          <p className="text-[10px] text-[#166534] font-semibold group-hover:underline">
+                            Resume &rarr;
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteDraft(draft.id, e)}
+                          title="Delete Draft"
+                          className="p-1.5 text-[#71717A] hover:text-[#991B1B] hover:bg-[#FEE2E2] rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-[#E6E2DA] flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowDraftsDrawer(false)}
+                className="px-4 py-2 bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] font-bold rounded-xl text-xs border border-[#E6E2DA] cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. KITCHEN ORDER TICKET (KOT) MODAL (80mm Thermal Ready) */}
+      {kotTicket && (
+        <div className="fixed inset-0 z-50 bg-[#111111]/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="max-w-sm w-full bg-white border border-[#E6E2DA] rounded-2xl p-6 shadow-xl space-y-4">
+            {/* Screen Header */}
+            <div className="flex items-center justify-between pb-2 border-b border-[#E6E2DA] no-print">
+              <div className="flex items-center gap-2">
+                <Utensils className="w-5 h-5 text-[#111111]" />
+                <h3 className="font-bold text-[#111111] text-sm font-serif">
+                  Kitchen Order Ticket (KOT)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setKotTicket(null)}
+                className="text-[#71717A] hover:text-[#111111] p-1 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Printable 80mm KOT Section */}
+            <div className="printable-receipt bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl p-4 text-xs font-mono space-y-2 text-[#111111]">
+              <div className="text-center border-b border-dashed border-[#111111] pb-2">
+                <h2 className="text-base font-bold font-serif uppercase tracking-wider">
+                  The Grove Cafe
+                </h2>
+                <p className="text-[11px] font-bold uppercase mt-0.5">Kitchen Order Ticket</p>
+                <p className="text-[10px] text-[#52525B]">Ticket #{kotTicket.order_number}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1 text-[11px] py-1 border-b border-dashed border-[#111111]">
+                <div>
+                  <span className="text-[#52525B]">Type:</span>{' '}
+                  <strong className="uppercase">{kotTicket.dining_type}</strong>
+                </div>
+                <div className="text-right">
+                  <span className="text-[#52525B]">Table:</span>{' '}
+                  <strong>{kotTicket.table_number || 'N/A'}</strong>
+                </div>
+                <div>
+                  <span className="text-[#52525B]">Server:</span> {kotTicket.server_name}
+                </div>
+                <div className="text-right">
+                  <span className="text-[#52525B]">Time:</span> {kotTicket.created_at}
+                </div>
+              </div>
+
+              {/* Items List */}
+              <div className="py-2 border-b border-dashed border-[#111111] space-y-2">
+                <div className="flex justify-between font-bold text-[11px] uppercase border-b border-[#E6E2DA] pb-1">
+                  <span>Item</span>
+                  <span>Qty</span>
+                </div>
+                {kotTicket.items.map((it, idx) => (
+                  <div key={idx} className="space-y-0.5">
+                    <div className="flex justify-between font-bold text-xs">
+                      <span>{it.item_name}</span>
+                      <span className="tabular-nums">&times; {it.quantity}</span>
+                    </div>
+                    {it.notes && (
+                      <p className="text-[10px] text-[#991B1B] italic font-serif">
+                        &gt;&gt; Instruction: {it.notes}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="text-center pt-1 text-[10px] text-[#52525B] italic">
+                -- End of Kitchen Ticket --
+              </div>
+            </div>
+
+            {/* Screen Actions */}
+            <div className="flex items-center gap-2 pt-2 no-print">
+              <button
+                type="button"
+                onClick={handlePrint}
+                className="flex-1 min-h-[44px] bg-[#111111] hover:bg-[#262626] text-white font-bold py-2 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Print 80mm KOT</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setKotTicket(null)}
+                className="min-h-[44px] px-4 py-2 bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] font-bold rounded-xl text-xs border border-[#E6E2DA] cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. ORDER RECEIPT MODAL (80mm Thermal Ready) */}
       {receipt && (
         <div className="fixed inset-0 z-50 bg-[#111111]/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="max-w-md w-full bg-white border border-[#E6E2DA] rounded-2xl p-6 shadow-xl text-center space-y-4">
-            <div className="w-14 h-14 bg-[#ECFDF5] text-[#166534] rounded-2xl flex items-center justify-center mx-auto border border-[#BBF7D0]">
-              <CheckCircle2 className="w-8 h-8" />
+          <div className="max-w-md w-full bg-white border border-[#E6E2DA] rounded-2xl p-6 shadow-xl space-y-4 max-h-[92vh] overflow-y-auto">
+            {/* Screen Header */}
+            <div className="text-center space-y-1 no-print">
+              <div className="w-12 h-12 bg-[#ECFDF5] text-[#166534] rounded-2xl flex items-center justify-center mx-auto border border-[#BBF7D0]">
+                <CheckCircle2 className="w-7 h-7" />
+              </div>
+              <h3 className="text-lg font-bold text-[#111111] font-serif">
+                Bill Completed Successfully!
+              </h3>
+              <p className="text-xs font-mono text-[#71717A] tabular-nums">
+                Order #{receipt.order_number}
+              </p>
             </div>
 
-            <div>
-              <h3 className="text-xl font-bold text-[#111111] font-serif">Bill Completed Successfully!</h3>
-              <p className="text-xs font-mono text-[#71717A] mt-0.5 tabular-nums">Order #{receipt.order_number}</p>
-            </div>
+            {/* Printable 80mm Receipt Section */}
+            <div className="printable-receipt bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl p-4 text-xs font-mono space-y-2 text-[#111111]">
+              <div className="text-center border-b border-dashed border-[#111111] pb-2">
+                <h2 className="text-base font-bold font-serif uppercase tracking-wider">
+                  The Grove Cafe
+                </h2>
+                <p className="text-[10px] text-[#52525B]">Tax Invoice / Customer Receipt</p>
+                <p className="text-[10px] text-[#52525B] mt-0.5">Order #{receipt.order_number}</p>
+                <p className="text-[9px] text-[#71717A]">{receipt.created_at || new Date().toLocaleString()}</p>
+              </div>
 
-            {/* Receipt Summary Card */}
-            <div className="bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl p-4 text-left space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-[#52525B]">Customer:</span>
-                <span className="font-bold text-[#111111]">{receipt.customer_name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#52525B]">Items Ordered:</span>
-                <span className="text-[#111111] font-medium">
-                  {receipt.items.map((i) => `${i.quantity}x ${i.item_name}`).join(', ')}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#52525B]">Subtotal:</span>
-                <span className="font-mono text-[#111111] tabular-nums">₹{receipt.subtotal}</span>
-              </div>
-              {receipt.discount_amount > 0 && (
-                <div className="flex justify-between text-[#991B1B]">
-                  <span>Points Redeemed:</span>
-                  <span className="font-mono tabular-nums">
-                    -{receipt.points_redeemed} pts (-₹{receipt.discount_amount})
-                  </span>
+              {/* Customer & Dining Meta */}
+              <div className="grid grid-cols-2 gap-1 text-[11px] py-1 border-b border-dashed border-[#111111]">
+                <div>
+                  <span className="text-[#52525B]">Customer:</span>{' '}
+                  <strong className="font-serif">{receipt.customer_name}</strong>
                 </div>
-              )}
-              <div className="flex justify-between text-sm font-bold text-[#111111] pt-2 border-t border-[#E6E2DA]">
-                <span>Total Paid:</span>
-                <span className="text-[#111111] font-mono tabular-nums">₹{receipt.final_amount}</span>
+                <div className="text-right">
+                  <span className="text-[#52525B]">Phone:</span> {receipt.customer_phone}
+                </div>
+                <div>
+                  <span className="text-[#52525B]">Type:</span>{' '}
+                  <strong className="uppercase">{receipt.dining_type}</strong>
+                </div>
+                <div className="text-right">
+                  <span className="text-[#52525B]">Table:</span>{' '}
+                  <strong>{receipt.table_number || 'N/A'}</strong>
+                </div>
+                <div>
+                  <span className="text-[#52525B]">Pay Mode:</span>{' '}
+                  <strong className="uppercase">{receipt.payment_method}</strong>
+                </div>
               </div>
-              <div className="flex justify-between text-[#166534] pt-1">
-                <span>Points Earned:</span>
-                <span className="font-mono font-bold tabular-nums">+{receipt.points_earned} pts</span>
+
+              {/* Items Breakdown */}
+              <div className="py-2 border-b border-dashed border-[#111111] space-y-1.5">
+                <div className="flex justify-between font-bold text-[11px] uppercase border-b border-[#E6E2DA] pb-1">
+                  <span>Item</span>
+                  <span>Amount</span>
+                </div>
+                {receipt.items.map((i, idx) => (
+                  <div key={idx} className="space-y-0.5">
+                    <div className="flex justify-between text-xs">
+                      <span>
+                        {i.quantity} &times; {i.item_name}
+                      </span>
+                      <span className="tabular-nums">₹{i.quantity * i.unit_price}</span>
+                    </div>
+                    {i.notes && (
+                      <p className="text-[10px] text-[#52525B] italic font-serif">Note: {i.notes}</p>
+                    )}
+                  </div>
+                ))}
               </div>
-              <div className="flex justify-between text-[#52525B] pt-1 border-t border-[#E6E2DA]">
-                <span>Updated Balance:</span>
-                <span className="font-mono font-bold text-[#111111] tabular-nums">{receipt.new_balance} pts</span>
+
+              {/* Amounts & Totals */}
+              <div className="space-y-1 pt-1 text-xs">
+                <div className="flex justify-between text-[#52525B]">
+                  <span>Subtotal:</span>
+                  <span className="font-mono tabular-nums">₹{receipt.subtotal}</span>
+                </div>
+                {receipt.extra_discount > 0 && (
+                  <div className="flex justify-between text-[#991B1B]">
+                    <span>Extra Discount:</span>
+                    <span className="font-mono tabular-nums">-₹{receipt.extra_discount}</span>
+                  </div>
+                )}
+                {receipt.discount_amount > 0 && (
+                  <div className="flex justify-between text-[#166534]">
+                    <span>Points Redeemed ({receipt.points_redeemed} pts):</span>
+                    <span className="font-mono tabular-nums">-₹{receipt.discount_amount}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-bold text-sm text-[#111111] pt-1 border-t border-[#111111]">
+                  <span>Total Paid:</span>
+                  <span className="font-mono tabular-nums">₹{receipt.final_amount}</span>
+                </div>
+              </div>
+
+              {/* Loyalty Points Footer */}
+              <div className="pt-2 border-t border-dashed border-[#111111] space-y-0.5 text-[11px]">
+                <div className="flex justify-between text-[#166534]">
+                  <span>Points Earned Today:</span>
+                  <strong className="font-mono tabular-nums">+{receipt.points_earned} pts</strong>
+                </div>
+                <div className="flex justify-between text-[#52525B]">
+                  <span>New Loyalty Balance:</span>
+                  <strong className="font-mono text-[#111111] tabular-nums">
+                    {receipt.new_balance} pts
+                  </strong>
+                </div>
+              </div>
+
+              <div className="text-center pt-2 text-[10px] text-[#52525B] italic">
+                Thank you for visiting The Grove Cafe!
               </div>
             </div>
 
-            {/* SMS Preview / Status banner */}
-            <div className="bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl p-3 text-left">
+            {/* SMS Status Banner */}
+            <div className="bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl p-3 text-left no-print">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-[#111111] mb-1">
                 <MessageSquare className="w-3.5 h-3.5 text-[#52525B]" />
                 <span>
@@ -1074,17 +1822,30 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
               </p>
             </div>
 
-            <button
-              onClick={handleNextCustomer}
-              className="w-full min-h-[44px] bg-[#111111] hover:bg-[#262626] text-white font-bold py-2.5 rounded-xl shadow-sm transition-all cursor-pointer"
-            >
-              Next Customer
-            </button>
+            {/* Screen Action Buttons */}
+            <div className="space-y-2 no-print">
+              <button
+                type="button"
+                onClick={handlePrint}
+                className="w-full min-h-[44px] bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] font-bold py-2 rounded-xl text-xs border border-[#E6E2DA] flex items-center justify-center gap-2 cursor-pointer transition-colors"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Print 80mm Bill Receipt</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleNextCustomer}
+                className="w-full min-h-[44px] bg-[#111111] hover:bg-[#262626] text-white font-bold py-2 rounded-xl text-xs shadow-sm transition-all cursor-pointer"
+              >
+                Next Customer &rarr;
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Custom Item Modal */}
+      {/* 7. CUSTOM ITEM MODAL */}
       {showCustomItemModal && (
         <div className="fixed inset-0 z-50 bg-[#111111]/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="max-w-xs w-full bg-white border border-[#E6E2DA] rounded-2xl p-5 shadow-xl space-y-3">
@@ -1127,7 +1888,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
         </div>
       )}
 
-      {/* Bonus Points Quick Modal */}
+      {/* 8. COURTESY BONUS POINTS MODAL */}
       {showBonusModal && currentCustomer && (
         <div className="fixed inset-0 z-50 bg-[#111111]/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="max-w-xs w-full bg-white border border-[#E6E2DA] rounded-2xl p-5 shadow-xl space-y-3">
@@ -1172,7 +1933,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
         </div>
       )}
 
-      {/* Link / Replace Unassigned Card Modal */}
+      {/* 9. LINK / REPLACE UNASSIGNED CARD MODAL */}
       {showLinkExistingModal && scanResult?.card_uid && (
         <div className="fixed inset-0 z-50 bg-[#111111]/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="max-w-md w-full bg-white border border-[#E6E2DA] rounded-2xl p-6 shadow-xl max-h-[90vh] overflow-y-auto">
@@ -1184,6 +1945,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => setShowLinkExistingModal(false)}
                 className="text-[#71717A] hover:text-[#111111] p-1 cursor-pointer"
               >
@@ -1318,7 +2080,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
         </div>
       )}
 
-      {/* Add Customer Modal */}
+      {/* 10. ADD CUSTOMER MODAL */}
       {showAddCustomerModal && (
         <AddCustomerModal
           initialCardUid={scanResult?.cardStatus === 'unassigned' ? scanResult.card_uid : undefined}

@@ -7,6 +7,10 @@ export interface MenuItem {
   category: string;
   price: number;
   is_available: number;
+  image_url?: string | null;
+  stock_qty?: number;
+  max_stock?: number;
+  low_stock_alert?: number;
   created_at: string;
 }
 

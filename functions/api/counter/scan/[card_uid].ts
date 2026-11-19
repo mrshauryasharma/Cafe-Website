@@ -123,7 +123,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       ).bind(customer.id).all<{ item_name: string; total_quantity: number }>(),
 
       env.DB.prepare(
-        'SELECT id, name, category, price, is_available, created_at FROM menu_items WHERE is_available = 1 ORDER BY category ASC, name ASC'
+        'SELECT * FROM menu_items WHERE is_available = 1 ORDER BY category ASC, name ASC'
       ).all<MenuItem>(),
 
       env.DB.prepare('SELECT * FROM cafe_settings WHERE id = 1').first<CafeSettingsRow>(),

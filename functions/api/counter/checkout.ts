@@ -1,5 +1,6 @@
 import { Env } from '../../types';
 import { authenticate } from '../../utils/auth';
+import { ensureSchema } from '../../utils/ensureSchema';
 import { CafeSettingsRow } from '../owner/settings';
 import { sendLoyaltySms, SmsResult } from '../../utils/sms';
 
@@ -8,6 +9,7 @@ export interface CheckoutLineItem {
   item_name: string;
   quantity: number;
   unit_price: number;
+  notes?: string;
 }
 
 export interface CheckoutPayload {
@@ -16,6 +18,11 @@ export interface CheckoutPayload {
   redeem_points: boolean;
   custom_redeem_points?: number;
   idempotency_key: string;
+  dining_type?: string;
+  table_number?: string;
+  extra_discount?: number;
+  payment_method?: string;
+  draft_id?: string;
 }
 
 export interface CheckoutReceipt {
@@ -25,12 +32,16 @@ export interface CheckoutReceipt {
   customer_name: string;
   customer_phone: string;
   subtotal: number;
+  extra_discount: number;
   points_redeemed: number;
   discount_amount: number;
   final_amount: number;
   points_earned: number;
   previous_balance: number;
   new_balance: number;
+  dining_type: string;
+  table_number: string | null;
+  payment_method: string;
   items: CheckoutLineItem[];
   created_at: string;
   sms: SmsResult;
@@ -42,8 +53,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (auth instanceof Response) return auth;
 
   try {
+    await ensureSchema(env.DB);
     const body = (await request.json()) as CheckoutPayload;
-    const { customer_id, items, redeem_points, custom_redeem_points, idempotency_key } = body;
+    const {
+      customer_id,
+      items,
+      redeem_points,
+      custom_redeem_points,
+      idempotency_key,
+      dining_type,
+      table_number,
+      extra_discount,
+      payment_method,
+      draft_id,
+    } = body;
 
     if (!customer_id) {
       return new Response(JSON.stringify({ error: 'Customer is required for checkout' }), {
@@ -67,14 +90,22 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       });
     }
 
+    const diningType = dining_type?.trim() || 'Dine-In';
+    const tableNumber = table_number?.trim() || null;
+    const extraDiscount = Math.max(0, Number(extra_discount) || 0);
+    const paymentMethod = payment_method?.trim() || 'Cash/UPI';
+    const draftId = draft_id?.trim() || null;
+
     // 1. Idempotency Check: Return existing order receipt if already processed
     const existingOrder = await env.DB.prepare(
-      'SELECT id, order_number, customer_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, created_at FROM orders WHERE idempotency_key = ?'
+      `SELECT id, order_number, customer_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned,
+              dining_type, table_number, extra_discount, payment_method, created_at 
+       FROM orders WHERE idempotency_key = ?`
     ).bind(cleanIdempotencyKey).first<any>();
 
     if (existingOrder) {
       const existingItems = await env.DB.prepare(
-        'SELECT menu_item_id, item_name, quantity, unit_price FROM order_items WHERE order_id = ?'
+        'SELECT menu_item_id, item_name, quantity, unit_price, notes FROM order_items WHERE order_id = ?'
       ).bind(existingOrder.id).all<CheckoutLineItem>();
 
       const cust = await env.DB.prepare('SELECT name, phone, points_balance FROM customers WHERE id = ?')
@@ -90,12 +121,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             customer_name: cust?.name || 'Customer',
             customer_phone: cust?.phone || '',
             subtotal: existingOrder.subtotal,
+            extra_discount: existingOrder.extra_discount ?? 0,
             points_redeemed: existingOrder.points_redeemed,
             discount_amount: existingOrder.discount_amount,
             final_amount: existingOrder.final_amount,
             points_earned: existingOrder.points_earned,
             previous_balance: cust?.points_balance ?? 0,
             new_balance: cust?.points_balance ?? 0,
+            dining_type: existingOrder.dining_type || 'Dine-In',
+            table_number: existingOrder.table_number || null,
+            payment_method: existingOrder.payment_method || 'Cash/UPI',
             items: existingItems.results || [],
             created_at: existingOrder.created_at,
             sms: { status: 'preview_only', message: 'Duplicate transaction idempotent replay' },
@@ -144,7 +179,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       last_backup_at: null,
     };
 
-    // 3. Calculate subtotal
+    // 3. Calculate subtotal & validate items
     let subtotal = 0;
     const validatedItems: CheckoutLineItem[] = [];
 
@@ -152,12 +187,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const q = Math.max(1, Math.floor(Number(item.quantity) || 1));
       const p = Math.max(0, Number(item.unit_price) || 0);
       const name = item.item_name?.trim() || 'Menu Item';
+      const notes = item.notes?.trim() || undefined;
       subtotal += q * p;
       validatedItems.push({
         menu_item_id: item.menu_item_id || undefined,
         item_name: name,
         quantity: q,
         unit_price: p,
+        notes,
       });
     }
 
@@ -168,13 +205,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       });
     }
 
-    // 4. Points Redemption Calculation
+    // 4. Points & Discount Calculation
+    const subtotalAfterExtra = Math.max(0, subtotal - extraDiscount);
     let pointsRedeemed = 0;
-    let discountAmount = 0;
+    let pointsDiscount = 0;
 
     if (redeem_points && customer.points_balance > 0) {
-      if (subtotal >= safeSettings.min_bill_for_redeem) {
-        const maxDiscountRupees = subtotal * (safeSettings.max_redeem_percent / 100);
+      if (subtotalAfterExtra >= safeSettings.min_bill_for_redeem) {
+        const maxDiscountRupees = subtotalAfterExtra * (safeSettings.max_redeem_percent / 100);
         const maxPointsByRupees = Math.floor(maxDiscountRupees / safeSettings.point_redeem_value);
         let maxAllowedPoints = Math.min(customer.points_balance, maxPointsByRupees);
 
@@ -183,12 +221,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         }
 
         pointsRedeemed = Math.max(0, Math.floor(maxAllowedPoints));
-        discountAmount = Math.round(pointsRedeemed * safeSettings.point_redeem_value * 100) / 100;
+        pointsDiscount = Math.round(pointsRedeemed * safeSettings.point_redeem_value * 100) / 100;
       }
     }
 
-    // 5. Final billing & earning calculations
-    const finalAmount = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
+    const totalDiscount = Math.round((extraDiscount + pointsDiscount) * 100) / 100;
+    const finalAmount = Math.max(0, Math.round((subtotalAfterExtra - pointsDiscount) * 100) / 100);
     const pointsEarned =
       safeSettings.earn_spend_unit > 0
         ? Math.floor((finalAmount / safeSettings.earn_spend_unit) * safeSettings.earn_points_per_unit)
@@ -197,20 +235,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const previousBalance = customer.points_balance;
     const newBalance = Math.round((previousBalance - pointsRedeemed + pointsEarned) * 100) / 100;
 
-    // 6. Generate IDs
+    // 5. Generate IDs
     const orderId = crypto.randomUUID();
     const orderNumber = `ORD-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`;
     const now = new Date().toISOString();
     const staffAttribution = `${auth.user.name} (${auth.user.role})`;
 
-    // 7. Atomic D1 Batch Execution
+    // 6. Atomic D1 Batch Execution
     const statements: D1PreparedStatement[] = [];
 
     // A. Insert Order
     statements.push(
       env.DB.prepare(
-        `INSERT INTO orders (id, order_number, customer_id, staff_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, idempotency_key, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO orders (id, order_number, customer_id, staff_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, idempotency_key, dining_type, table_number, extra_discount, payment_method, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         orderId,
         orderNumber,
@@ -218,10 +256,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         auth.user.id,
         subtotal,
         pointsRedeemed,
-        discountAmount,
+        totalDiscount,
         finalAmount,
         pointsEarned,
         cleanIdempotencyKey,
+        diningType,
+        tableNumber,
+        extraDiscount,
+        paymentMethod,
         now
       )
     );
@@ -230,8 +272,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     for (const item of validatedItems) {
       statements.push(
         env.DB.prepare(
-          `INSERT INTO order_items (id, order_id, menu_item_id, item_name, quantity, unit_price, total_price)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO order_items (id, order_id, menu_item_id, item_name, quantity, unit_price, total_price, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           crypto.randomUUID(),
           orderId,
@@ -239,12 +281,31 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           item.item_name,
           item.quantity,
           item.unit_price,
-          item.quantity * item.unit_price
+          item.quantity * item.unit_price,
+          item.notes || null
         )
+      );
+
+      // C. Stock decrement when item is from menu_items
+      if (item.menu_item_id) {
+        statements.push(
+          env.DB.prepare(
+            `UPDATE menu_items
+             SET stock_qty = MAX(0, stock_qty - ?)
+             WHERE id = ?`
+          ).bind(item.quantity, item.menu_item_id)
+        );
+      }
+    }
+
+    // D. Delete draft order if resuming draft
+    if (draftId) {
+      statements.push(
+        env.DB.prepare('DELETE FROM draft_orders WHERE id = ?').bind(draftId)
       );
     }
 
-    // C. Update Customer totals & balance
+    // E. Update Customer totals & balance
     statements.push(
       env.DB.prepare(
         `UPDATE customers
@@ -255,7 +316,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       ).bind(newBalance, finalAmount, customer.id)
     );
 
-    // D. Insert points_ledger entries
+    // F. Insert points_ledger entries
     let runningBalance = previousBalance;
 
     if (pointsRedeemed > 0) {
@@ -270,7 +331,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           orderId,
           -pointsRedeemed,
           runningBalance,
-          `Redeemed ₹${discountAmount} discount on Order #${orderNumber}`,
+          `Redeemed ₹${pointsDiscount} discount on Order #${orderNumber}`,
           staffAttribution,
           now
         )
@@ -298,7 +359,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     await env.DB.batch(statements);
 
-    // 8. Trigger SMS Notification
+    // 7. Trigger SMS Notification
     const smsResult = await sendLoyaltySms(safeSettings, customer, {
       cafe_name: safeSettings.cafe_name || 'The Grove Cafe',
       customer_name: customer.name,
@@ -315,12 +376,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       customer_name: customer.name,
       customer_phone: customer.phone,
       subtotal,
+      extra_discount: extraDiscount,
       points_redeemed: pointsRedeemed,
-      discount_amount: discountAmount,
+      discount_amount: totalDiscount,
       final_amount: finalAmount,
       points_earned: pointsEarned,
       previous_balance: previousBalance,
       new_balance: newBalance,
+      dining_type: diningType,
+      table_number: tableNumber,
+      payment_method: paymentMethod,
       items: validatedItems,
       created_at: now,
       sms: smsResult,
