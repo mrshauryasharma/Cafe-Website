@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { User } from '../../types';
 import { CustomerDetailProfile } from '../../../functions/api/customers/[id]';
+import { detectNfcCapabilities, normalizeCardInput } from '../../utils/nfcPlatform';
 
 interface CustomerProfileViewProps {
   customerId: string;
@@ -69,13 +70,9 @@ export const CustomerProfileView: React.FC<CustomerProfileViewProps> = ({
   const [bonusReason, setBonusReason] = useState('');
   const [submittingBonus, setSubmittingBonus] = useState(false);
 
-  // Web NFC for replacement
-  const [nfcSupported, setNfcSupported] = useState(false);
+  // Cross-platform NFC for replacement
+  const nfcCaps = detectNfcCapabilities();
   const [nfcScanning, setNfcScanning] = useState(false);
-
-  useEffect(() => {
-    setNfcSupported('NDEFReader' in window);
-  }, []);
 
   const fetchProfile = async () => {
     try {
@@ -145,7 +142,11 @@ export const CustomerProfileView: React.FC<CustomerProfileViewProps> = ({
 
   const startNfcScan = async () => {
     if (!('NDEFReader' in window)) {
-      alert('Web NFC is available on supported Android devices.');
+      alert(
+        nfcCaps.isIos
+          ? 'On iPhone: Hold your membership card to the top edge of your iPhone to scan.'
+          : 'Web NFC is available on supported Android devices.'
+      );
       return;
     }
     try {
@@ -156,7 +157,7 @@ export const CustomerProfileView: React.FC<CustomerProfileViewProps> = ({
       // @ts-ignore
       ndef.addEventListener('reading', ({ serialNumber }: any) => {
         if (serialNumber) {
-          const uid = serialNumber.replace(/:/g, '').toUpperCase();
+          const uid = normalizeCardInput(serialNumber.replace(/:/g, ''));
           setNewCardUid(uid);
           setNfcScanning(false);
         }
@@ -169,7 +170,8 @@ export const CustomerProfileView: React.FC<CustomerProfileViewProps> = ({
 
   const handleReplaceCard = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCardUid.trim()) return;
+    const cleanUid = normalizeCardInput(newCardUid.trim());
+    if (!cleanUid) return;
     setError(null);
     setSubmittingReplace(true);
 
@@ -178,7 +180,7 @@ export const CustomerProfileView: React.FC<CustomerProfileViewProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          new_card_uid: newCardUid.trim(),
+          new_card_uid: cleanUid,
           reason: replaceReason.trim(),
         }),
       });
@@ -739,7 +741,7 @@ export const CustomerProfileView: React.FC<CustomerProfileViewProps> = ({
                   <label className="text-xs font-semibold text-[#52525B] uppercase tracking-wider">
                     New Card UID *
                   </label>
-                  {nfcSupported && (
+                  {nfcCaps.hasWebNfc && (
                     <button
                       type="button"
                       onClick={startNfcScan}
@@ -753,11 +755,21 @@ export const CustomerProfileView: React.FC<CustomerProfileViewProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="e.g. 04A1B2C3D4"
+                  placeholder="e.g. GROVE-001 or 001"
                   value={newCardUid}
                   onChange={(e) => setNewCardUid(e.target.value)}
+                  onBlur={() => {
+                    if (newCardUid.trim()) {
+                      setNewCardUid(normalizeCardInput(newCardUid));
+                    }
+                  }}
                   className="w-full min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-3.5 py-2.5 text-sm text-[#111111] focus:outline-none focus:border-[#111111] focus:bg-white font-mono uppercase tabular-nums"
                 />
+                {nfcCaps.isIos && (
+                  <p className="mt-1.5 text-[11px] text-[#52525B] leading-relaxed">
+                    <strong>On iPhone:</strong> Tap the new card to the top edge of your iPhone (outside this screen) to open &amp; link it, or type the Card ID printed on the card (e.g., GROVE-001).
+                  </p>
+                )}
               </div>
 
               <div>

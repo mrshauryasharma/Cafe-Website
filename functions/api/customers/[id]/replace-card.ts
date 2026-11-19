@@ -32,7 +32,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     };
 
     const rawUid = body.new_card_uid?.trim();
-    const cleanUid = rawUid ? rawUid.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : '';
+    const cleanUid = rawUid ? rawUid.trim().replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase() : '';
     const reason = body.reason?.trim() || 'Lost or damaged card replacement';
 
     if (!cleanUid) {

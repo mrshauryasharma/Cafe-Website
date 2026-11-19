@@ -35,7 +35,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   if (auth instanceof Response) return auth;
 
   const rawCardUid = params.card_uid as string;
-  const cleanUid = rawCardUid ? rawCardUid.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : '';
+  const cleanUid = rawCardUid ? rawCardUid.trim().replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase() : '';
 
   if (!cleanUid) {
     return new Response(JSON.stringify({ error: 'Card UID is required' }), {

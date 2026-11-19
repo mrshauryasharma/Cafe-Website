@@ -16,6 +16,8 @@ import {
   UserPlus,
   MessageSquare,
   Gift,
+  Smartphone,
+  RefreshCw,
 } from 'lucide-react';
 import { User as AuthUser } from '../../types';
 import { MenuItem } from '../../../functions/api/owner/menu';
@@ -24,6 +26,7 @@ import { CardScanResult } from '../../../functions/api/counter/scan/[card_uid]';
 import { CheckoutReceipt } from '../../../functions/api/counter/checkout';
 import { AddCustomerModal } from '../customers/AddCustomerModal';
 import { CustomerProfileView } from '../customers/CustomerProfileView';
+import { detectNfcCapabilities, normalizeCardInput } from '../../utils/nfcPlatform';
 
 interface CounterTerminalProps {
   currentUser: AuthUser;
@@ -55,8 +58,8 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
 
-  // Web NFC
-  const [nfcSupported, setNfcSupported] = useState(false);
+  // Cross-platform NFC
+  const nfcCaps = detectNfcCapabilities();
   const [nfcListening, setNfcListening] = useState(false);
 
   // Cart & Billing State
@@ -80,14 +83,21 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   const [bonusReason, setBonusReason] = useState('');
   const [submittingBonus, setSubmittingBonus] = useState(false);
 
+  // Link / Replace Card Modal for Unassigned Card Tag
+  const [showLinkExistingModal, setShowLinkExistingModal] = useState(false);
+  const [linkSearchQuery, setLinkSearchQuery] = useState('');
+  const [linkSearchResults, setLinkSearchResults] = useState<any[]>([]);
+  const [selectedCustomerForLink, setSelectedCustomerForLink] = useState<any | null>(null);
+  const [linkReason, setLinkReason] = useState('Card replacement / re-linked at counter');
+  const [submittingLink, setSubmittingLink] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+
   // Feedback
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   // 1. Initial Load of Menu & Settings
   useEffect(() => {
-    setNfcSupported('NDEFReader' in window);
-
     const initCounter = async () => {
       try {
         setLoadingInit(true);
@@ -115,7 +125,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
 
   // Lookup Card UID
   const handleLookupCard = async (uid: string) => {
-    const clean = uid.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    const clean = normalizeCardInput(uid);
     if (!clean) return;
 
     setError(null);
@@ -144,7 +154,11 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   // Web NFC Reader
   const startNfcReader = async () => {
     if (!('NDEFReader' in window)) {
-      alert('Web NFC is available on supported Android devices with Chrome.');
+      alert(
+        nfcCaps.isIos
+          ? 'On iPhone: Hold your membership card to the top edge of your iPhone to scan.'
+          : 'Web NFC is available on supported Android devices with Chrome.'
+      );
       return;
     }
 
@@ -157,7 +171,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
       // @ts-ignore
       ndef.addEventListener('reading', ({ serialNumber }: any) => {
         if (serialNumber) {
-          const uid = serialNumber.replace(/:/g, '').toUpperCase();
+          const uid = normalizeCardInput(serialNumber.replace(/:/g, ''));
           handleLookupCard(uid);
           setNfcListening(false);
         }
@@ -169,22 +183,86 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     }
   };
 
-  // Quick Customer Search by name or phone
+  // Quick Customer Search by name, phone, or card UID / shorthand
   const handleSearchCustomer = async (q: string) => {
     setCustomerSearchQuery(q);
-    if (!q || q.length < 2) {
+    const trimmed = q.trim();
+    if (!trimmed) {
       setSearchResults([]);
       return;
     }
 
     try {
-      const res = await fetch(`/api/customers?search=${encodeURIComponent(q)}`);
+      const normalizedCard = normalizeCardInput(trimmed);
+      const effectiveSearch =
+        normalizedCard && normalizedCard.startsWith('GROVE-') ? normalizedCard : trimmed;
+
+      const res = await fetch(`/api/customers?search=${encodeURIComponent(effectiveSearch)}`);
       if (res.ok) {
         const data = (await res.json()) as any[];
         setSearchResults(data);
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // Search existing customer for linking unassigned card
+  const handleSearchForLink = async (q: string) => {
+    setLinkSearchQuery(q);
+    const trimmed = q.trim();
+    if (!trimmed) {
+      setLinkSearchResults([]);
+      return;
+    }
+
+    try {
+      const normalizedCard = normalizeCardInput(trimmed);
+      const effectiveSearch =
+        normalizedCard && normalizedCard.startsWith('GROVE-') ? normalizedCard : trimmed;
+      const res = await fetch(`/api/customers?search=${encodeURIComponent(effectiveSearch)}`);
+      if (res.ok) {
+        const data = (await res.json()) as any[];
+        setLinkSearchResults(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Confirm linking unassigned card to existing customer
+  const handleConfirmLinkCard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCustomerForLink || !scanResult?.card_uid) return;
+
+    setSubmittingLink(true);
+    setLinkError(null);
+
+    try {
+      const res = await fetch(`/api/customers/${selectedCustomerForLink.id}/replace-card`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          new_card_uid: scanResult.card_uid,
+          reason: linkReason.trim() || 'Card replacement via counter terminal',
+        }),
+      });
+
+      const data = (await res.json()) as { success?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error || 'Failed to link card');
+
+      setSuccess(`Card ${scanResult.card_uid} linked to ${selectedCustomerForLink.name}!`);
+      setShowLinkExistingModal(false);
+      setSelectedCustomerForLink(null);
+      setLinkSearchQuery('');
+      setLinkSearchResults([]);
+
+      await handleLookupCard(scanResult.card_uid);
+      setTimeout(() => setSuccess(null), 4000);
+    } catch (err: any) {
+      setLinkError(err.message || 'Card linking failed');
+    } finally {
+      setSubmittingLink(false);
     }
   };
 
@@ -435,27 +513,52 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
       <div className="bg-white border border-[#E6E2DA] rounded-2xl p-4 shadow-sm">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-1">
-            {/* NFC Tap Button */}
-            <button
-              type="button"
-              onClick={startNfcReader}
-              title={nfcSupported ? 'Tap physical tag to device' : 'Web NFC supported on Android Chrome'}
-              className={`min-h-[44px] px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all whitespace-nowrap cursor-pointer shadow-xs ${
-                nfcListening
-                  ? 'bg-[#111111] text-white animate-pulse'
-                  : 'bg-[#111111] hover:bg-[#262626] text-white'
-              }`}
-            >
-              <Radio className={`w-4 h-4 ${nfcListening ? 'animate-spin' : ''}`} />
-              <span>{nfcListening ? 'Listening for Tag...' : 'Tap NFC Card'}</span>
-            </button>
+            {/* NFC Tap Button / Platform Badge */}
+            {nfcCaps.hasWebNfc ? (
+              <button
+                type="button"
+                onClick={startNfcReader}
+                title="Tap physical NFC tag to phone"
+                className={`min-h-[44px] px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all whitespace-nowrap cursor-pointer shadow-xs ${
+                  nfcListening
+                    ? 'bg-[#111111] text-white animate-pulse'
+                    : 'bg-[#111111] hover:bg-[#262626] text-white'
+                }`}
+              >
+                <Radio className={`w-4 h-4 ${nfcListening ? 'animate-spin' : ''}`} />
+                <span>{nfcListening ? 'Listening for Tag...' : 'Tap NFC Card'}</span>
+              </button>
+            ) : nfcCaps.isIos ? (
+              <div
+                title="iPhone native background NFC reading is active"
+                className="min-h-[44px] px-3.5 py-2 bg-[#F3EFEA] border border-[#E6E2DA] rounded-xl flex items-center gap-2 text-xs text-[#111111] flex-shrink-0"
+              >
+                <Smartphone className="w-4 h-4 text-[#111111] flex-shrink-0" />
+                <span className="hidden sm:inline font-serif">
+                  <strong>iPhone NFC Ready:</strong> Tap card to top edge.
+                </span>
+                <span className="sm:hidden font-serif font-bold text-[11px]">
+                  iPhone NFC Active
+                </span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={startNfcReader}
+                title="Web NFC or Card ID Entry"
+                className="min-h-[44px] px-3.5 py-2 bg-[#F3EFEA] hover:bg-[#E6E2DA] border border-[#E6E2DA] rounded-xl flex items-center gap-2 text-xs font-bold text-[#111111] transition-colors cursor-pointer flex-shrink-0"
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>Tap NFC Card</span>
+              </button>
+            )}
 
             {/* Quick Customer Search Input */}
             <div className="relative flex-1">
               <Search className="w-4 h-4 absolute left-3 top-3 text-[#71717A]" />
               <input
                 type="text"
-                placeholder="Search Customer Name, Phone, or Card UID..."
+                placeholder="Search Customer Name, Phone, or Card UID (e.g. 001)..."
                 value={customerSearchQuery}
                 onChange={(e) => handleSearchCustomer(e.target.value)}
                 className="w-full min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl pl-9 pr-3 py-2 text-sm text-[#111111] placeholder-[#71717A] focus:outline-none focus:border-[#111111] focus:bg-white transition-colors"
@@ -473,6 +576,9 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                       <div>
                         <p className="font-bold text-[#111111] text-sm">{cust.name}</p>
                         <p className="text-[12px] text-[#52525B] font-mono tabular-nums">{cust.phone}</p>
+                        {cust.card_uid && (
+                          <p className="text-[11px] text-[#71717A] font-mono mt-0.5">Card: {cust.card_uid}</p>
+                        )}
                       </div>
                       <span className="font-mono text-[#166534] font-bold tabular-nums bg-[#ECFDF5] border border-[#BBF7D0] px-2 py-0.5 rounded-md">
                         {cust.points_balance} pts
@@ -494,10 +600,15 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
           >
             <input
               type="text"
-              placeholder="Card UID"
+              placeholder="Card UID (e.g. 001)"
               value={scannedCardUid}
               onChange={(e) => setScannedCardUid(e.target.value)}
-              className="w-32 min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-3 py-2 text-xs text-[#111111] font-mono uppercase focus:outline-none focus:border-[#111111] focus:bg-white tabular-nums"
+              onBlur={() => {
+                if (scannedCardUid.trim()) {
+                  setScannedCardUid(normalizeCardInput(scannedCardUid));
+                }
+              }}
+              className="w-36 min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-3 py-2 text-xs text-[#111111] font-mono uppercase focus:outline-none focus:border-[#111111] focus:bg-white tabular-nums"
             />
             <button
               type="submit"
@@ -508,6 +619,16 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
             </button>
           </form>
         </div>
+
+        {/* iPhone NFC Helper banner */}
+        {nfcCaps.isIos && (
+          <div className="mt-2.5 pt-2 border-t border-[#E6E2DA] flex items-center gap-2 text-[11px] text-[#52525B]">
+            <Smartphone className="w-3.5 h-3.5 text-[#111111] flex-shrink-0" />
+            <span>
+              <strong>iPhone NFC Ready:</strong> Hold card near the top edge of your iPhone &amp; tap the Safari banner to scan.
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 2. CARD STATE BANNERS */}
@@ -539,7 +660,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
       )}
 
       {scanResult?.cardStatus === 'unassigned' && (
-        <div className="bg-[#FFFBEB] border border-[#FDE68A] rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[#92400E]">
+        <div className="bg-[#FFFBEB] border border-[#FDE68A] rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-[#92400E]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-[#FEF3C7] rounded-xl flex items-center justify-center text-[#92400E] flex-shrink-0">
               <CreditCard className="w-6 h-6" />
@@ -553,13 +674,28 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
               </p>
             </div>
           </div>
-          <button
-            onClick={() => setShowAddCustomerModal(true)}
-            className="min-h-[38px] px-4 py-2 bg-[#92400E] hover:bg-[#78350F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors whitespace-nowrap self-end sm:self-auto cursor-pointer"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>Register Customer With This Card</span>
-          </button>
+          <div className="flex items-center gap-2 flex-wrap self-end md:self-auto">
+            <button
+              onClick={() => setShowAddCustomerModal(true)}
+              className="min-h-[38px] px-3.5 py-2 bg-[#92400E] hover:bg-[#78350F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Register New Customer</span>
+            </button>
+            <button
+              onClick={() => {
+                setShowLinkExistingModal(true);
+                setSelectedCustomerForLink(null);
+                setLinkSearchQuery('');
+                setLinkSearchResults([]);
+                setLinkError(null);
+              }}
+              className="min-h-[38px] px-3.5 py-2 bg-white hover:bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Link / Replace for Existing</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -1036,9 +1172,156 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
         </div>
       )}
 
+      {/* Link / Replace Unassigned Card Modal */}
+      {showLinkExistingModal && scanResult?.card_uid && (
+        <div className="fixed inset-0 z-50 bg-[#111111]/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-white border border-[#E6E2DA] rounded-2xl p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-[#E6E2DA]">
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-[#111111]" />
+                <h3 className="font-bold text-[#111111] text-base font-serif">
+                  Link Card <span className="font-mono text-[#92400E]">{scanResult.card_uid}</span>
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowLinkExistingModal(false)}
+                className="text-[#71717A] hover:text-[#111111] p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {linkError && (
+              <div className="mb-4 p-3 bg-[#FEF2F2] border border-[#FECACA] rounded-xl text-[#991B1B] text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span className="font-semibold">{linkError}</span>
+              </div>
+            )}
+
+            <div className="p-3 bg-[#FFFBEB] border border-[#FDE68A] rounded-xl text-[#92400E] text-xs leading-relaxed mb-4">
+              <strong>Seamless Card Linking:</strong> Select an existing customer below. Linking <strong>{scanResult.card_uid}</strong> will automatically preserve their loyalty points, visit history, and block any previous lost card.
+            </div>
+
+            {!selectedCustomerForLink ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[#52525B] uppercase tracking-wider mb-1">
+                    Search Existing Customer
+                  </label>
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-3 text-[#71717A]" />
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="Type name, phone number, or old card..."
+                      value={linkSearchQuery}
+                      onChange={(e) => handleSearchForLink(e.target.value)}
+                      className="w-full min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl pl-9 pr-3 py-2 text-sm text-[#111111] placeholder-[#71717A] focus:outline-none focus:border-[#111111] focus:bg-white transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div className="max-h-60 overflow-y-auto divide-y divide-[#E6E2DA] border border-[#E6E2DA] rounded-xl">
+                  {linkSearchResults.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-[#71717A] italic">
+                      {linkSearchQuery.trim()
+                        ? 'No matching customer found.'
+                        : 'Search by customer name or phone number.'}
+                    </div>
+                  ) : (
+                    linkSearchResults.map((cust) => (
+                      <div
+                        key={cust.id}
+                        onClick={() => setSelectedCustomerForLink(cust)}
+                        className="p-3 hover:bg-[#F3EFEA] cursor-pointer flex items-center justify-between text-xs transition-colors"
+                      >
+                        <div>
+                          <p className="font-bold text-[#111111] text-sm">{cust.name}</p>
+                          <p className="text-[12px] text-[#52525B] font-mono tabular-nums">{cust.phone}</p>
+                          {cust.card_uid && (
+                            <p className="text-[11px] text-[#71717A] font-mono mt-0.5">
+                              Current Card: {cust.card_uid}
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <span className="font-mono text-[#166534] font-bold tabular-nums bg-[#ECFDF5] border border-[#BBF7D0] px-2 py-0.5 rounded-md inline-block">
+                            {cust.points_balance} pts
+                          </span>
+                          <p className="text-[10px] text-[#52525B] mt-1 font-semibold">Select &rarr;</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleConfirmLinkCard} className="space-y-4">
+                <div className="p-3 bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-[#71717A]">Selected Customer:</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCustomerForLink(null)}
+                      className="text-xs text-[#111111] font-semibold underline cursor-pointer"
+                    >
+                      Change
+                    </button>
+                  </div>
+                  <p className="font-bold text-sm text-[#111111]">{selectedCustomerForLink.name}</p>
+                  <p className="text-xs font-mono text-[#52525B] tabular-nums">{selectedCustomerForLink.phone}</p>
+                  <div className="pt-1 text-xs text-[#166534] font-semibold">
+                    Current Points Balance: {selectedCustomerForLink.points_balance} pts
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#52525B] uppercase tracking-wider mb-1">
+                    Reason for Linking / Replacement
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={linkReason}
+                    onChange={(e) => setLinkReason(e.target.value)}
+                    placeholder="e.g. Card replacement at counter"
+                    className="w-full min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-3.5 py-2.5 text-sm text-[#111111] focus:outline-none focus:border-[#111111] focus:bg-white transition-colors"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCustomerForLink(null)}
+                    className="min-h-[44px] px-4 py-2 rounded-xl text-xs font-semibold text-[#52525B] hover:text-[#111111] bg-[#F3EFEA] hover:bg-[#E6E2DA] border border-[#E6E2DA] cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingLink}
+                    className="min-h-[44px] bg-[#111111] hover:bg-[#262626] disabled:opacity-50 text-white font-bold px-5 py-2 rounded-xl text-xs shadow-sm cursor-pointer flex items-center gap-1.5"
+                  >
+                    {submittingLink ? (
+                      'Linking Card...'
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Confirm &amp; Link {scanResult.card_uid}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Add Customer Modal */}
       {showAddCustomerModal && (
         <AddCustomerModal
+          initialCardUid={scanResult?.cardStatus === 'unassigned' ? scanResult.card_uid : undefined}
           onClose={() => setShowAddCustomerModal(false)}
           onCustomerAdded={(newCust) => {
             setShowAddCustomerModal(false);

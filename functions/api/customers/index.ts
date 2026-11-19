@@ -94,7 +94,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const notes = body.notes?.trim() || null;
     const smsConsent = body.sms_consent === 0 ? 0 : 1;
     const rawCardUid = body.card_uid?.trim();
-    const cleanCardUid = rawCardUid ? rawCardUid.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : null;
+    const cleanCardUid = rawCardUid ? rawCardUid.trim().replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase() : null;
 
     if (!name || !phone) {
       return new Response(

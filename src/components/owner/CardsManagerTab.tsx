@@ -14,6 +14,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { CardRow } from '../../../functions/api/owner/cards';
+import { detectNfcCapabilities, normalizeCardInput } from '../../utils/nfcPlatform';
 
 interface CardCounts {
   total: number;
@@ -43,14 +44,10 @@ export const CardsManagerTab: React.FC = () => {
   const [blockReason, setBlockReason] = useState('');
   const [submittingBlock, setSubmittingBlock] = useState(false);
 
-  // Web NFC Reader State
+  // Cross-platform NFC detection
+  const nfcCaps = detectNfcCapabilities();
   const [nfcScanning, setNfcScanning] = useState(false);
-  const [nfcSupported, setNfcSupported] = useState(false);
   const [scannedUids, setScannedUids] = useState<string[]>([]);
-
-  useEffect(() => {
-    setNfcSupported('NDEFReader' in window);
-  }, []);
 
   const fetchCards = async () => {
     try {
@@ -88,9 +85,11 @@ export const CardsManagerTab: React.FC = () => {
     const parsedFromInput = bulkInput
       .split(/[\r\n,]+/)
       .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .map(normalizeCardInput)
       .filter((s) => s.length > 0);
 
-    const combined = Array.from(new Set([...parsedFromInput, ...scannedUids]));
+    const combined = Array.from(new Set([...parsedFromInput, ...scannedUids.map(normalizeCardInput)]));
 
     if (combined.length === 0) {
       setError('Please provide at least one Card UID.');
@@ -146,7 +145,11 @@ export const CardsManagerTab: React.FC = () => {
 
   const startWebNfcScan = async () => {
     if (!('NDEFReader' in window)) {
-      alert('Web NFC is not supported on this browser or platform (Supported on Android Chrome).');
+      alert(
+        nfcCaps.isIos
+          ? 'On iPhone: Hold your membership card to the top edge of your iPhone to scan.'
+          : 'Web NFC is not supported on this browser or platform (Supported on Android Chrome).'
+      );
       return;
     }
 
@@ -159,7 +162,7 @@ export const CardsManagerTab: React.FC = () => {
       // @ts-ignore
       ndef.addEventListener('reading', ({ serialNumber }: any) => {
         if (serialNumber) {
-          const uid = serialNumber.replace(/:/g, '').toUpperCase();
+          const uid = normalizeCardInput(serialNumber.replace(/:/g, ''));
           setScannedUids((prev) => Array.from(new Set([...prev, uid])));
         }
       });
@@ -465,7 +468,7 @@ export const CardsManagerTab: React.FC = () => {
 
                 <div className="p-3 bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl text-center flex flex-col items-center justify-between">
                   <p className="text-xs font-semibold text-[#111111]">Rapid Web NFC Tap</p>
-                  {nfcSupported ? (
+                  {nfcCaps.hasWebNfc ? (
                     <button
                       type="button"
                       onClick={startWebNfcScan}
@@ -474,6 +477,10 @@ export const CardsManagerTab: React.FC = () => {
                       <Radio className={`w-3.5 h-3.5 ${nfcScanning ? 'animate-spin' : ''}`} />
                       <span>{nfcScanning ? 'Listening...' : 'Tap Physical Tags'}</span>
                     </button>
+                  ) : nfcCaps.isIos ? (
+                    <p className="text-[11px] text-[#52525B] mt-1 leading-snug">
+                      <strong>On iPhone:</strong> Tap any card to the top edge to open &amp; verify in terminal, or type Card IDs.
+                    </p>
                   ) : (
                     <p className="text-[11px] text-[#71717A] mt-1">Available on Android Chrome</p>
                   )}

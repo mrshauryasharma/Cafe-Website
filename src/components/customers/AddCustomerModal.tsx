@@ -1,34 +1,40 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { UserPlus, X, Radio, AlertCircle } from 'lucide-react';
 import { CustomerSummaryRow } from '../../../functions/api/customers/index';
+import { detectNfcCapabilities, normalizeCardInput } from '../../utils/nfcPlatform';
 
 interface AddCustomerModalProps {
+  initialCardUid?: string;
   onClose: () => void;
   onCustomerAdded: (newCustomer: CustomerSummaryRow) => void;
 }
 
-export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ onClose, onCustomerAdded }) => {
+export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
+  initialCardUid,
+  onClose,
+  onCustomerAdded,
+}) => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [dob, setDob] = useState('');
   const [notes, setNotes] = useState('');
   const [smsConsent, setSmsConsent] = useState(true);
-  const [cardUid, setCardUid] = useState('');
+  const [cardUid, setCardUid] = useState(initialCardUid ? normalizeCardInput(initialCardUid) : '');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Web NFC scanner state
-  const [nfcSupported, setNfcSupported] = useState(false);
+  // Cross-platform NFC detection
+  const nfcCaps = detectNfcCapabilities();
   const [nfcScanning, setNfcScanning] = useState(false);
-
-  useEffect(() => {
-    setNfcSupported('NDEFReader' in window);
-  }, []);
 
   const startNfcScan = async () => {
     if (!('NDEFReader' in window)) {
-      alert('Web NFC is only supported on Android Chrome or supported handheld browsers.');
+      alert(
+        nfcCaps.isIos
+          ? 'On iPhone: Hold your membership card to the top edge of your iPhone to scan.'
+          : 'Web NFC is only supported on Android Chrome or supported handheld browsers.'
+      );
       return;
     }
 
@@ -41,7 +47,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ onClose, onC
       // @ts-ignore
       ndef.addEventListener('reading', ({ serialNumber }: any) => {
         if (serialNumber) {
-          const uid = serialNumber.replace(/:/g, '').toUpperCase();
+          const uid = normalizeCardInput(serialNumber.replace(/:/g, ''));
           setCardUid(uid);
           setNfcScanning(false);
         }
@@ -58,6 +64,8 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ onClose, onC
     setError(null);
     setLoading(true);
 
+    const normalizedUid = cardUid.trim() ? normalizeCardInput(cardUid) : undefined;
+
     try {
       const res = await fetch('/api/customers', {
         method: 'POST',
@@ -68,7 +76,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ onClose, onC
           dob: dob.trim() || undefined,
           notes: notes.trim() || undefined,
           sms_consent: smsConsent ? 1 : 0,
-          card_uid: cardUid.trim() || undefined,
+          card_uid: normalizedUid,
         }),
       });
 
@@ -139,7 +147,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ onClose, onC
               <label className="text-xs font-semibold text-[#52525B] uppercase tracking-wider">
                 NFC Membership Card UID (Optional)
               </label>
-              {nfcSupported && (
+              {nfcCaps.hasWebNfc && (
                 <button
                   type="button"
                   onClick={startNfcScan}
@@ -152,11 +160,21 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ onClose, onC
             </div>
             <input
               type="text"
-              placeholder="e.g. 04A1B2C3D4 or scan physical card"
+              placeholder="e.g. GROVE-001 or 001"
               value={cardUid}
               onChange={(e) => setCardUid(e.target.value)}
+              onBlur={() => {
+                if (cardUid.trim()) {
+                  setCardUid(normalizeCardInput(cardUid));
+                }
+              }}
               className="w-full min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-3.5 py-2.5 text-sm text-[#111111] placeholder-[#71717A] font-mono uppercase focus:outline-none focus:border-[#111111] focus:bg-white tabular-nums transition-colors"
             />
+            {nfcCaps.isIos && (
+              <p className="mt-1.5 text-[11px] text-[#52525B] leading-relaxed">
+                <strong>On iPhone:</strong> Tap the new card to the top edge of your iPhone (outside this screen) to open &amp; link it, or type the Card ID printed on the card (e.g., GROVE-001).
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
