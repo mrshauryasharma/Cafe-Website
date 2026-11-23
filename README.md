@@ -1,6 +1,6 @@
-# The Grove Cafe — Point of Sale (POS) & NFC Loyalty Platform
+# Kimmo’s Kitchen — Point of Sale (POS) & NFC Loyalty Platform
 
-A high-performance, single-tenant, cloud-native Point of Sale (POS) and NFC Loyalty platform engineered specifically for **The Grove Cafe**. Built on **React 18 + TypeScript + Vite + Tailwind CSS + PWA**, running edge API endpoints on **Cloudflare Pages Functions** with serverless **Cloudflare D1 (SQLite)**, and secured via the Web Cryptography API (`crypto.subtle`).
+A high-performance, single-tenant, cloud-native Point of Sale (POS) and NFC Loyalty platform engineered specifically for **Kimmo’s Kitchen**. Built on **React 18 + TypeScript + Vite + Tailwind CSS + PWA**, running edge API endpoints on **Cloudflare Pages Functions** with serverless **Cloudflare D1 (SQLite)**, and secured via the Web Cryptography API (`crypto.subtle`).
 
 Styled with classic **Times New Roman** serif typography (`font-serif`, `tabular-nums` on all financial figures) and a curated **White, Black & Soft Light Café** palette (`#FAF9F6` canvas, `#FFFFFF` cards, `#111111` primary ink, `#F3EFEA` warm cream, `#ECFDF5` sage mint, `#FFFBEB` soft amber, and `#FEF2F2` soft rose).
 
@@ -18,11 +18,11 @@ Styled with classic **Times New Roman** serif typography (`font-serif`, `tabular
   - **Customer Bill Receipt**: Formatted with Café Branding, Order #, Token #, GST/Tax breakdown, Payment method, and Loyalty Points earned/balance.
 
 ### 2. Cross-Platform NFC Architecture (iOS & Android)
-- **Zero-PII On-Card Footprint**: Physical NFC tags store only a clean URL/UID (`https://the-grove-cafe.pages.dev/scan/:card_uid`).
+- **Zero-PII On-Card Footprint**: Physical NFC tags store only a clean URL/UID (`https://kimmos-kitchen.pages.dev/scan/:card_uid`).
 - **Unauthenticated Lockout Screen**: When scanned by an unauthenticated customer phone, the app presents a secure **"Authorized Staff Access Only"** lockout gate with zero personal data leakage.
 - **Android Chrome**: Automatic hardware tap-to-read via Web NFC (`NDEFReader`).
 - **iPhone / iOS Safari**: Native background NDEF tag reading that opens Safari directly to the `/scan/:card_uid` route, plus manual card UID search and QR camera scanner fallback.
-- **Instant Card Linking & Lost-Card Replacement**: Unassigned cards (`GROVE-001` through `GROVE-300`) can be instantly bound to a customer profile at counter checkout. Lost cards can be replaced in one tap with automatic point balance migration.
+- **Instant Card Linking & Lost-Card Replacement**: Unassigned cards (`KIMMO-001` through `KIMMO-300`) can be instantly bound to a customer profile at counter checkout. Lost cards can be replaced in one tap with automatic point balance migration.
 
 ### 3. Inventory Management & Menu Stock Performance
 - **Live Stock Deduction**: Inventory counts decrement automatically as orders are completed at the POS.
@@ -44,7 +44,7 @@ Styled with classic **Times New Roman** serif typography (`font-serif`, `tabular
 ### 5. Disaster Recovery & System Handover State
 - **Monthly JSON Database Export**: Full snapshot export of all 10 SQLite database tables in a single `.json` bundle.
 - **Atomic Database Restore**: Upload a backup `.json` file during initial setup to restore the complete cafe state, or perform disaster recovery while live.
-- **Zero-Setup Handover State**: The production database contains 300 pre-loaded NFC cards (`GROVE-001` to `GROVE-300`) and 19 starter menu items. Zero user accounts exist, allowing the owner to complete first-boot onboarding at `https://the-grove-cafe.pages.dev`.
+- **Zero-Setup Handover State**: The production database contains 300 pre-loaded NFC cards (`KIMMO-001` to `KIMMO-300`) and 19 starter menu items. Zero user accounts exist, allowing the owner to complete first-boot onboarding at `https://kimmos-kitchen.pages.dev`.
 
 ---
 
@@ -79,8 +79,8 @@ Cafe_Website/
 │       ├── crypto.ts              # PBKDF2 password hashing & token signing
 │       └── ensureSchema.ts        # Dynamic runtime schema verification
 ├── nfc-cards/                     # Physical NFC Card Provisioning
-│   ├── grove_300_cards_bulk_upload.csv     # 300 UIDs (GROVE-001 to GROVE-300)
-│   └── grove_300_cards_encoding_sheet.csv  # 300 UIDs with encoding target URLs
+│   ├── kimmo_300_cards_bulk_upload.csv     # 300 UIDs (KIMMO-001 to KIMMO-300)
+│   └── kimmo_300_cards_encoding_sheet.csv  # 300 UIDs with encoding target URLs
 ├── src/                           # React 18 TypeScript Frontend
 │   ├── components/                # UI components (Header, Modal, POS, Thermal print)
 │   ├── pages/                     # POS Terminal, Scan lockout, Owner dashboard, Setup
@@ -89,7 +89,7 @@ Cafe_Website/
 │   ├── App.tsx                    # Route definitions & global layout
 │   └── main.tsx                   # Application entry point
 ├── schema.sql                     # Full 10-table Cloudflare D1 SQL schema
-├── seed.sql                       # 19 starter menu items for The Grove Cafe
+├── seed.sql                       # 19 starter menu items for Kimmo’s Kitchen
 └── wrangler.toml                  # Cloudflare Pages & D1 database binding config
 ```
 
@@ -142,8 +142,8 @@ npx wrangler whoami
 
 Your `wrangler.toml` file is already bound to the live `cafe_loyalty_db` instance:
 ```toml
-name = "the-grove-cafe"
-compatibility_date = "2024-04-03"
+name = "kimmos-kitchen"
+compatibility_date = "2024-11-01"
 pages_build_output_dir = "dist"
 
 [[d1_databases]]
@@ -165,20 +165,20 @@ npx tsc --noEmit
 npm run build
 
 # Deploy directly to Cloudflare Pages
-npx wrangler pages deploy dist --project-name=the-grove-cafe
+npx wrangler pages deploy dist --project-name=kimmos-kitchen
 ```
 
 The application is deployed live at:
-**`https://the-grove-cafe.pages.dev`**
+**`https://kimmos-kitchen.pages.dev`**
 
 ---
 
 ## 📋 Owner First-Boot Onboarding Guide
 
-1. Open `https://the-grove-cafe.pages.dev` on any desktop, tablet, or phone.
+1. Open `https://kimmos-kitchen.pages.dev` on any desktop, tablet, or phone.
 2. Because no users exist on fresh handover, the **System Initialization Gate** automatically appears.
 3. Complete the Setup Form:
-   - **Café Name**: `The Grove Cafe`
+   - **Café Name**: `Kimmo’s Kitchen`
    - **Owner Full Name**: `Owner Name`
    - **Username**: `owner`
    - **Password**: Create a strong password (minimum 8 characters)
@@ -186,7 +186,7 @@ The application is deployed live at:
 5. Log into the **Owner Dashboard** to:
    - Review or adjust loyalty rules (Points per currency unit, point values, welcome bonuses).
    - Create staff logins for counter baristas.
-   - Inspect the 300 pre-loaded NFC cards (`GROVE-001` to `GROVE-300`).
+   - Inspect the 300 pre-loaded NFC cards (`KIMMO-001` to `KIMMO-300`).
    - Monitor real-time POS sales and inventory levels.
 
 ---
@@ -194,7 +194,7 @@ The application is deployed live at:
 ## 🔒 Security Architecture & Verification
 
 1. **Zero-PII NFC Protection**:
-   - Visit `https://the-grove-cafe.pages.dev/scan/GROVE-001` in an unauthenticated or private browser window.
+   - Visit `https://kimmos-kitchen.pages.dev/scan/KIMMO-001` in an unauthenticated or private browser window.
    - The application serves an **"Authorized Staff Access Only"** lockout gate. No customer names, phone numbers, or balances are accessible.
 2. **HttpOnly Cookie Sessions**:
    - All session tokens are delivered via cryptographically signed `HttpOnly; SameSite=Lax; Path=/` cookies, preventing XSS-based credential theft.
@@ -209,5 +209,5 @@ The application is deployed live at:
 ## 🏷️ Physical NFC Card Encoding
 
 The repository includes ready-to-use CSV files under `nfc-cards/`:
-- `grove_300_cards_bulk_upload.csv`: 300 unique Card UIDs (`GROVE-001` to `GROVE-300`) for batch importing into other systems.
-- `grove_300_cards_encoding_sheet.csv`: Card numbers, UIDs, and standard NDEF URI payloads (`https://the-grove-cafe.pages.dev/scan/GROVE-xxx`) for NFC desktop writers or mobile card encoding apps (e.g., NFC Tools).
+- `kimmo_300_cards_bulk_upload.csv`: 300 unique Card UIDs (`KIMMO-001` to `KIMMO-300`) for batch importing into other systems.
+- `kimmo_300_cards_encoding_sheet.csv`: Card numbers, UIDs, and standard NDEF URI payloads (`https://kimmos-kitchen.pages.dev/scan/KIMMO-xxx`) for NFC desktop writers or mobile card encoding apps (e.g., NFC Tools).

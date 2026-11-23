@@ -47,14 +47,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     // Fetch cafe name
-    let cafeName = 'The Grove Cafe';
+    let cafeName = 'Kimmo’s Kitchen';
     try {
       const settings = await env.DB.prepare('SELECT cafe_name FROM cafe_settings WHERE id = 1').first<{ cafe_name: string }>();
       if (settings?.cafe_name) {
         cafeName = settings.cafe_name;
       }
     } catch {
-      cafeName = 'The Grove Cafe';
+      cafeName = 'Kimmo’s Kitchen';
     }
 
     const sessionPayload: UserSession = {

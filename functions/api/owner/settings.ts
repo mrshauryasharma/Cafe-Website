@@ -51,7 +51,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
   try {
     const body = (await request.json()) as Partial<CafeSettingsRow>;
 
-    const cafeName = body.cafe_name?.trim() || 'The Grove Cafe';
+    const cafeName = body.cafe_name?.trim() || 'Kimmo’s Kitchen';
     const earnPointsPerUnit = Number(body.earn_points_per_unit ?? 10);
     const earnSpendUnit = Number(body.earn_spend_unit ?? 100);
     const pointRedeemValue = Number(body.point_redeem_value ?? 1.0);

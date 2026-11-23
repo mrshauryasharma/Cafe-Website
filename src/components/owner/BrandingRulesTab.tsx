@@ -132,7 +132,7 @@ export const BrandingRulesTab: React.FC<BrandingRulesTabProps> = ({ onCafeNameCh
             required
             value={settings.cafe_name}
             onChange={(e) => setSettings({ ...settings, cafe_name: e.target.value })}
-            placeholder="The Grove Cafe"
+            placeholder="Kimmo’s Kitchen"
             className="w-full min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-4 py-2.5 text-[#111111] placeholder-[#71717A] focus:outline-none focus:border-[#111111] focus:bg-white transition-colors text-sm"
           />
           <p className="text-xs text-[#71717A] mt-1.5 leading-relaxed">
@@ -323,7 +323,7 @@ export const BrandingRulesTab: React.FC<BrandingRulesTabProps> = ({ onCafeNameCh
                   type="text"
                   value={settings.sms_sender_id || ''}
                   onChange={(e) => setSettings({ ...settings, sms_sender_id: e.target.value })}
-                  placeholder="e.g. GROVEC"
+                  placeholder="e.g. KIMMO"
                   className="w-full min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-4 py-2.5 text-[#111111] text-sm focus:outline-none focus:border-[#111111] focus:bg-white uppercase font-mono"
                 />
               </div>

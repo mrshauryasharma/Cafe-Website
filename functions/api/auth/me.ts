@@ -9,7 +9,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     if (!token) {
       return new Response(
-        JSON.stringify({ user: null, cafe_name: 'The Grove Cafe' }),
+        JSON.stringify({ user: null, cafe_name: 'Kimmo’s Kitchen' }),
         { status: 401, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -17,7 +17,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     const session = await verifyJwt<UserSession>(token, env.JWT_SECRET || DEFAULT_JWT_SECRET);
     if (!session || !session.id) {
       return new Response(
-        JSON.stringify({ user: null, cafe_name: 'The Grove Cafe' }),
+        JSON.stringify({ user: null, cafe_name: 'Kimmo’s Kitchen' }),
         { status: 401, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -35,20 +35,20 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     if (!user || user.is_active !== 1) {
       return new Response(
-        JSON.stringify({ user: null, cafe_name: 'The Grove Cafe' }),
+        JSON.stringify({ user: null, cafe_name: 'Kimmo’s Kitchen' }),
         { status: 401, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
     // Fetch cafe_name
-    let cafeName = 'The Grove Cafe';
+    let cafeName = 'Kimmo’s Kitchen';
     try {
       const settings = await env.DB.prepare('SELECT cafe_name FROM cafe_settings WHERE id = 1').first<{ cafe_name: string }>();
       if (settings?.cafe_name) {
         cafeName = settings.cafe_name;
       }
     } catch {
-      cafeName = 'The Grove Cafe';
+      cafeName = 'Kimmo’s Kitchen';
     }
 
     return new Response(
@@ -70,7 +70,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     );
   } catch (error: any) {
     return new Response(
-      JSON.stringify({ user: null, cafe_name: 'The Grove Cafe', error: error.message }),
+      JSON.stringify({ user: null, cafe_name: 'Kimmo’s Kitchen', error: error.message }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }

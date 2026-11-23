@@ -31,7 +31,7 @@ export async function sendLoyaltySms(
 
   // Render template
   const rendered = rawTemplate
-    .replace(/\{\{cafe_name\}\}/g, variables.cafe_name || 'The Grove Cafe')
+    .replace(/\{\{cafe_name\}\}/g, variables.cafe_name || 'Kimmo’s Kitchen')
     .replace(/\{\{customer_name\}\}/g, variables.customer_name || 'Customer')
     .replace(/\{\{bill_amount\}\}/g, String(variables.bill_amount))
     .replace(/\{\{points_redeemed\}\}/g, String(variables.points_redeemed))

@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['vite.svg'],
       manifest: {
-        name: 'The Grove Cafe Terminal & Loyalty',
-        short_name: 'The Grove Cafe',
+        name: 'Kimmo’s Kitchen Terminal & Loyalty',
+        short_name: 'Kimmo’s Kitchen',
         description: 'Smart Café Billing, Loyalty, and Membership Terminal',
         theme_color: '#111111',
         background_color: '#FAF9F6',

@@ -30,13 +30,13 @@ export function detectNfcCapabilities(): NfcCapabilities {
 
 /**
  * Normalizes card inputs from direct keyboard entry, barcode/QR/URL paste,
- * or shorthand numbers (e.g. "1" or "001" -> "GROVE-001").
+ * or shorthand numbers (e.g. "1" or "001" -> "KIMMO-001").
  */
 export function normalizeCardInput(raw: string): string {
   if (!raw) return '';
   let cleaned = raw.trim();
 
-  // 1. If a full scan URL is pasted/scanned (e.g., https://the-grove-cafe.pages.dev/scan/GROVE-001)
+  // 1. If a full scan URL is pasted/scanned (e.g., https://kimmos-kitchen.pages.dev/scan/KIMMO-001)
   if (cleaned.includes('/scan/')) {
     const parts = cleaned.split('/scan/');
     if (parts[1]) {
@@ -59,19 +59,27 @@ export function normalizeCardInput(raw: string): string {
 
   cleaned = cleaned.trim().toUpperCase();
 
-  // 2. Shorthand numeric entry like "1", "01", "001", "42", "300"
+  // 2. Shorthand numeric entry like "1", "01", "001", "42", "300" -> KIMMO-001
   if (/^\d{1,4}$/.test(cleaned)) {
     const num = parseInt(cleaned, 10);
     const padded = String(num).padStart(3, '0');
-    return `GROVE-${padded}`;
+    return `KIMMO-${padded}`;
   }
 
-  // 3. Shorthand with GROVE prefix like "GROVE1" or "GROVE-1"
+  // 3. Shorthand with KIMMO prefix like "KIMMO1" or "KIMMO-1"
+  const kimmoMatch = cleaned.match(/^KIMMO[-_ ]?(\d{1,4})$/i);
+  if (kimmoMatch && kimmoMatch[1]) {
+    const num = parseInt(kimmoMatch[1], 10);
+    const padded = String(num).padStart(3, '0');
+    return `KIMMO-${padded}`;
+  }
+
+  // Legacy fallback if GROVE- prefix is entered
   const groveMatch = cleaned.match(/^GROVE[-_ ]?(\d{1,4})$/i);
   if (groveMatch && groveMatch[1]) {
     const num = parseInt(groveMatch[1], 10);
     const padded = String(num).padStart(3, '0');
-    return `GROVE-${padded}`;
+    return `KIMMO-${padded}`;
   }
 
   // 4. Default: remove invalid characters while retaining valid hyphens/alphanumerics

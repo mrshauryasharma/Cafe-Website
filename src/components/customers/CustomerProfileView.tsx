@@ -755,7 +755,7 @@ export const CustomerProfileView: React.FC<CustomerProfileViewProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="e.g. GROVE-001 or 001"
+                  placeholder="e.g. KIMMO-001 or 001"
                   value={newCardUid}
                   onChange={(e) => setNewCardUid(e.target.value)}
                   onBlur={() => {
@@ -767,7 +767,7 @@ export const CustomerProfileView: React.FC<CustomerProfileViewProps> = ({
                 />
                 {nfcCaps.isIos && (
                   <p className="mt-1.5 text-[11px] text-[#52525B] leading-relaxed">
-                    <strong>On iPhone:</strong> Tap the new card to the top edge of your iPhone (outside this screen) to open &amp; link it, or type the Card ID printed on the card (e.g., GROVE-001).
+                    <strong>On iPhone:</strong> Tap the new card to the top edge of your iPhone (outside this screen) to open &amp; link it, or type the Card ID printed on the card (e.g., KIMMO-001).
                   </p>
                 )}
               </div>

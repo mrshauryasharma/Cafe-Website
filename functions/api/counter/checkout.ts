@@ -165,7 +165,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     const safeSettings: CafeSettingsRow = settings || {
       id: 1,
-      cafe_name: 'The Grove Cafe',
+      cafe_name: 'Kimmo’s Kitchen',
       earn_points_per_unit: 10,
       earn_spend_unit: 100,
       point_redeem_value: 1.0,
@@ -377,7 +377,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     // 7. Trigger SMS Notification
     const smsResult = await sendLoyaltySms(safeSettings, customer, {
-      cafe_name: safeSettings.cafe_name || 'The Grove Cafe',
+      cafe_name: safeSettings.cafe_name || 'Kimmo’s Kitchen',
       customer_name: customer.name,
       bill_amount: finalAmount,
       points_redeemed: pointsRedeemed,

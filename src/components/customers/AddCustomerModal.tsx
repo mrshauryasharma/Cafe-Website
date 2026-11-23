@@ -160,7 +160,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
             </div>
             <input
               type="text"
-              placeholder="e.g. GROVE-001 or 001"
+              placeholder="e.g. KIMMO-001 or 001"
               value={cardUid}
               onChange={(e) => setCardUid(e.target.value)}
               onBlur={() => {
@@ -172,7 +172,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
             />
             {nfcCaps.isIos && (
               <p className="mt-1.5 text-[11px] text-[#52525B] leading-relaxed">
-                <strong>On iPhone:</strong> Tap the new card to the top edge of your iPhone (outside this screen) to open &amp; link it, or type the Card ID printed on the card (e.g., GROVE-001).
+                <strong>On iPhone:</strong> Tap the new card to the top edge of your iPhone (outside this screen) to open &amp; link it, or type the Card ID printed on the card (e.g., KIMMO-001).
               </p>
             )}
           </div>

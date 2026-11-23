@@ -13,8 +13,8 @@ export const SetupGate: React.FC<SetupGateProps> = ({ onSetupComplete, onRestore
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Fresh setup state prefilled with "The Grove Cafe"
-  const [cafeName, setCafeName] = useState('The Grove Cafe');
+  // Fresh setup state prefilled with "Kimmo’s Kitchen"
+  const [cafeName, setCafeName] = useState('Kimmo’s Kitchen');
   const [ownerName, setOwnerName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -33,7 +33,7 @@ export const SetupGate: React.FC<SetupGateProps> = ({ onSetupComplete, onRestore
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          cafe_name: cafeName.trim() || 'The Grove Cafe',
+          cafe_name: cafeName.trim() || 'Kimmo’s Kitchen',
           name: ownerName.trim(),
           username: username.trim(),
           password,
@@ -49,7 +49,7 @@ export const SetupGate: React.FC<SetupGateProps> = ({ onSetupComplete, onRestore
         throw new Error('User record missing in response');
       }
 
-      onSetupComplete(data.user, data.cafe_name || 'The Grove Cafe');
+      onSetupComplete(data.user, data.cafe_name || 'Kimmo’s Kitchen');
     } catch (err: any) {
       setError(err.message || 'Something went wrong');
     } finally {
@@ -127,7 +127,7 @@ export const SetupGate: React.FC<SetupGateProps> = ({ onSetupComplete, onRestore
             <Coffee className="w-7 h-7 text-[#111111]" />
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-[#111111] tracking-tight font-serif">
-            The Grove Cafe
+            Kimmo’s Kitchen
           </h1>
           <p className="text-xs uppercase tracking-widest text-[#52525B] mt-1 font-sans font-medium">
             System Initialization & Master Gate
@@ -194,7 +194,7 @@ export const SetupGate: React.FC<SetupGateProps> = ({ onSetupComplete, onRestore
               <input
                 type="text"
                 required
-                placeholder="The Grove Cafe"
+                placeholder="Kimmo’s Kitchen"
                 value={cafeName}
                 onChange={(e) => setCafeName(e.target.value)}
                 className="w-full min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-3.5 py-2.5 text-base text-[#111111] placeholder-[#71717A] focus:outline-none focus:border-[#111111] focus:bg-white transition-colors"
@@ -226,7 +226,7 @@ export const SetupGate: React.FC<SetupGateProps> = ({ onSetupComplete, onRestore
                 type="text"
                 required
                 autoComplete="username"
-                placeholder="e.g. owner or grove_admin"
+                placeholder="e.g. owner or kimmo_admin"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-3.5 py-2.5 text-base text-[#111111] placeholder-[#71717A] focus:outline-none focus:border-[#111111] focus:bg-white transition-colors lowercase"

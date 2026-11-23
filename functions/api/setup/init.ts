@@ -29,7 +29,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const name = body.name?.trim();
     const username = body.username?.trim().toLowerCase();
     const password = body.password;
-    const cafeName = body.cafe_name?.trim() || 'The Grove Cafe';
+    const cafeName = body.cafe_name?.trim() || 'Kimmo’s Kitchen';
 
     if (!name || !username || !password) {
       return new Response(

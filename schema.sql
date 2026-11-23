@@ -3,7 +3,7 @@
 -- 1. Café Settings (Dynamic Branding & System Config)
 CREATE TABLE IF NOT EXISTS cafe_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
-  cafe_name TEXT NOT NULL DEFAULT 'The Grove Cafe',
+  cafe_name TEXT NOT NULL DEFAULT 'Kimmo’s Kitchen',
   earn_points_per_unit REAL NOT NULL DEFAULT 10,
   earn_spend_unit REAL NOT NULL DEFAULT 100,
   point_redeem_value REAL NOT NULL DEFAULT 1.0,

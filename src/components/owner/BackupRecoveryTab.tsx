@@ -80,7 +80,7 @@ export const BackupRecoveryTab: React.FC = () => {
 
       const blob = await res.blob();
       const dateStr = new Date().toISOString().slice(0, 10);
-      const filename = `the-grove-cafe-backup-${dateStr}.json`;
+      const filename = `kimmos-kitchen-backup-${dateStr}.json`;
 
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');

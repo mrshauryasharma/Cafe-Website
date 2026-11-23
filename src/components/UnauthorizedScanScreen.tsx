@@ -27,7 +27,7 @@ export const UnauthorizedScanScreen: React.FC<UnauthorizedScanScreenProps> = ({
 
         <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#F3EFEA] border border-[#E6E2DA] rounded-full text-xs text-[#52525B] font-semibold mb-3">
           <Coffee className="w-3.5 h-3.5 text-[#111111]" />
-          <span>{cafeName || 'The Grove Cafe'} Membership Tag</span>
+          <span>{cafeName || 'Kimmo’s Kitchen'} Membership Tag</span>
         </div>
 
         <h1 className="text-xl sm:text-2xl font-bold text-[#111111] tracking-tight mb-2 font-serif">

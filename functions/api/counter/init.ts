@@ -23,7 +23,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         menu_items: menuResult.results || [],
         settings: settingsResult || {
           id: 1,
-          cafe_name: 'The Grove Cafe',
+          cafe_name: 'Kimmo’s Kitchen',
           earn_points_per_unit: 10,
           earn_spend_unit: 100,
           point_redeem_value: 1.0,

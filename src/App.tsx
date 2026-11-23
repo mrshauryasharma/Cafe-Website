@@ -9,7 +9,7 @@ import { Coffee } from 'lucide-react';
 export const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState<boolean | null>(null);
-  const [cafeName, setCafeName] = useState<string>('The Grove Cafe');
+  const [cafeName, setCafeName] = useState<string>('Kimmo’s Kitchen');
   const [user, setUser] = useState<User | null>(null);
 
   // Parse path for /scan/:card_uid
@@ -76,7 +76,7 @@ export const App: React.FC = () => {
         <div className="w-14 h-14 bg-white border border-[#E6E2DA] text-[#111111] rounded-2xl flex items-center justify-center shadow-sm mb-4">
           <Coffee className="w-7 h-7 animate-pulse text-[#111111]" />
         </div>
-        <p className="text-sm font-semibold tracking-wide text-[#111111]">Connecting to The Grove Cafe...</p>
+        <p className="text-sm font-semibold tracking-wide text-[#111111]">Connecting to Kimmo’s Kitchen...</p>
         <p className="text-xs text-[#71717A] mt-1">Initializing Secure Terminal</p>
       </div>
     );

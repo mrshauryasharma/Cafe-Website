@@ -19,14 +19,14 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     }
 
     // Fetch cafe_name if available
-    let cafeName = 'The Grove Cafe';
+    let cafeName = 'Kimmo’s Kitchen';
     try {
       const settings = await env.DB.prepare('SELECT cafe_name FROM cafe_settings WHERE id = 1').first<{ cafe_name: string }>();
       if (settings?.cafe_name) {
         cafeName = settings.cafe_name;
       }
     } catch {
-      cafeName = 'The Grove Cafe';
+      cafeName = 'Kimmo’s Kitchen';
     }
 
     return new Response(
@@ -45,7 +45,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     return new Response(
       JSON.stringify({
         isInitialized: false,
-        cafe_name: 'The Grove Cafe',
+        cafe_name: 'Kimmo’s Kitchen',
         error: error.message || 'Failed to check setup status',
       }),
       {

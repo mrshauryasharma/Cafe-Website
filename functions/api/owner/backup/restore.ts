@@ -67,7 +67,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).bind(
             row.id || 1,
-            row.cafe_name || 'The Grove Cafe',
+            row.cafe_name || 'Kimmo’s Kitchen',
             row.earn_points_per_unit ?? 10,
             row.earn_spend_unit ?? 100,
             row.point_redeem_value ?? 1.0,
@@ -86,7 +86,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       statements.push(
         env.DB.prepare(
           `INSERT INTO cafe_settings (id, cafe_name, earn_points_per_unit, earn_spend_unit, point_redeem_value, min_bill_for_redeem, max_redeem_percent, staff_max_bonus_points, sms_enabled)
-           VALUES (1, 'The Grove Cafe', 10, 100, 1.0, 0, 100, 50, 0)`
+           VALUES (1, 'Kimmo’s Kitchen', 10, 100, 1.0, 0, 100, 50, 0)`
         )
       );
     }

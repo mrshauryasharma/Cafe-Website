@@ -239,7 +239,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     try {
       const normalizedCard = normalizeCardInput(trimmed);
       const effectiveSearch =
-        normalizedCard && normalizedCard.startsWith('GROVE-') ? normalizedCard : trimmed;
+        normalizedCard && (normalizedCard.startsWith('KIMMO-') || normalizedCard.startsWith('GROVE-')) ? normalizedCard : trimmed;
 
       const res = await fetch(`/api/customers?search=${encodeURIComponent(effectiveSearch)}`);
       if (res.ok) {
@@ -263,7 +263,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     try {
       const normalizedCard = normalizeCardInput(trimmed);
       const effectiveSearch =
-        normalizedCard && normalizedCard.startsWith('GROVE-') ? normalizedCard : trimmed;
+        normalizedCard && (normalizedCard.startsWith('KIMMO-') || normalizedCard.startsWith('GROVE-')) ? normalizedCard : trimmed;
       const res = await fetch(`/api/customers?search=${encodeURIComponent(effectiveSearch)}`);
       if (res.ok) {
         const data = (await res.json()) as any[];
@@ -1635,7 +1635,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
             <div className="printable-receipt bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl p-4 text-xs font-mono space-y-2 text-[#111111]">
               <div className="text-center border-b border-dashed border-[#111111] pb-2">
                 <h2 className="text-base font-bold font-serif uppercase tracking-wider">
-                  The Grove Cafe
+                  {settings?.cafe_name || 'Kimmo’s Kitchen'}
                 </h2>
                 <p className="text-[11px] font-bold uppercase mt-0.5">Kitchen Order Ticket</p>
                 <p className="text-[10px] text-[#52525B]">Ticket #{kotTicket.order_number}</p>
@@ -1727,7 +1727,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
             <div className="printable-receipt bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl p-4 text-xs font-mono space-y-2 text-[#111111]">
               <div className="text-center border-b border-dashed border-[#111111] pb-2">
                 <h2 className="text-base font-bold font-serif uppercase tracking-wider">
-                  The Grove Cafe
+                  {settings?.cafe_name || 'Kimmo’s Kitchen'}
                 </h2>
                 <p className="text-[10px] text-[#52525B]">Tax Invoice / Customer Receipt</p>
                 <p className="text-[10px] text-[#52525B] mt-0.5">Order #{receipt.order_number}</p>
@@ -1817,7 +1817,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
               </div>
 
               <div className="text-center pt-2 text-[10px] text-[#52525B] italic">
-                Thank you for visiting The Grove Cafe!
+                Thank you for visiting {settings?.cafe_name || 'Kimmo’s Kitchen'}!
               </div>
             </div>
 

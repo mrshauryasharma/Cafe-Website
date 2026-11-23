@@ -51,7 +51,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           </div>
           <div>
             <h1 className="font-bold text-lg sm:text-xl text-[#111111] leading-tight font-serif tracking-tight">
-              {cafeName || 'The Grove Cafe'}
+              {cafeName || 'Kimmo’s Kitchen'}
             </h1>
             <p className="text-[11px] uppercase tracking-widest text-[#52525B] font-sans font-medium">
               Loyalty & Counter System

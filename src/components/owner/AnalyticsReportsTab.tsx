@@ -48,7 +48,7 @@ export const AnalyticsReportsTab: React.FC = () => {
     if (!data) return;
 
     const lines: string[] = [];
-    lines.push(`THE GROVE CAFE - BUSINESS & LOYALTY REPORT`);
+    lines.push(`KIMMO'S KITCHEN - BUSINESS & LOYALTY REPORT`);
     lines.push(`Generated At,${new Date().toLocaleString()}`);
     lines.push(`Date Range,${data.range.toUpperCase()}`);
     lines.push('');
@@ -96,7 +96,7 @@ export const AnalyticsReportsTab: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `the-grove-cafe-report-${data.range}-${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `kimmos-kitchen-report-${data.range}-${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

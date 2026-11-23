@@ -53,7 +53,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ cafeName, onLoginSucce
             <Coffee className="w-7 h-7 text-[#111111]" />
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-[#111111] tracking-tight font-serif">
-            {cafeName || 'The Grove Cafe'}
+            {cafeName || 'Kimmo’s Kitchen'}
           </h1>
           <p className="text-xs uppercase tracking-widest text-[#52525B] mt-1 font-sans font-medium">
             Staff & Owner Counter Terminal
