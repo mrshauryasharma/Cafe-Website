@@ -16,6 +16,7 @@ interface BackupPayload {
     draft_orders?: any[];
     inventory_logs?: any[];
     cafe_tables?: any[];
+    kot_queue?: any[];
   };
 }
 
@@ -202,8 +203,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       for (const o of data.orders) {
         statements.push(
           env.DB.prepare(
-            `INSERT INTO orders (id, order_number, customer_id, staff_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, idempotency_key, dining_type, table_number, extra_discount, payment_method, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            `INSERT INTO orders (id, order_number, customer_id, staff_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, idempotency_key, dining_type, table_number, extra_discount, payment_method, waiter_id, waiter_name, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).bind(
             o.id || crypto.randomUUID(),
             o.order_number,
@@ -219,6 +220,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             o.table_number ?? null,
             o.extra_discount ?? 0,
             o.payment_method || 'Cash/UPI',
+            o.waiter_id ?? null,
+            o.waiter_name ?? null,
             o.created_at || new Date().toISOString()
           )
         );
@@ -273,18 +276,24 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       for (const d of data.draft_orders) {
         statements.push(
           env.DB.prepare(
-            `INSERT INTO draft_orders (id, draft_number, customer_id, dining_type, table_number, items_json, notes, created_by, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            `INSERT INTO draft_orders (id, draft_number, customer_id, customer_name, customer_phone, dining_type, table_id, table_number, waiter_id, waiter_name, items_json, notes, created_by, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).bind(
             d.id || crypto.randomUUID(),
             d.draft_number,
             d.customer_id ?? null,
+            d.customer_name ?? null,
+            d.customer_phone ?? null,
             d.dining_type || 'Dine-In',
+            d.table_id ?? null,
             d.table_number ?? null,
+            d.waiter_id ?? null,
+            d.waiter_name ?? null,
             d.items_json || '[]',
             d.notes ?? null,
             d.created_by,
-            d.created_at || new Date().toISOString()
+            d.created_at || new Date().toISOString(),
+            d.updated_at ?? null
           )
         );
       }
@@ -307,6 +316,34 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             log.notes ?? null,
             log.performed_by,
             log.created_at || new Date().toISOString()
+          )
+        );
+      }
+    }
+
+    // 11. kot_queue
+    if (data.kot_queue) {
+      for (const k of data.kot_queue) {
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO kot_queue (id, kot_number, draft_id, table_id, table_number, customer_name, customer_phone, waiter_id, waiter_name, ticket_type, items_json, reason, status, created_at, printed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            k.id || crypto.randomUUID(),
+            k.kot_number,
+            k.draft_id ?? null,
+            k.table_id ?? null,
+            k.table_number,
+            k.customer_name ?? null,
+            k.customer_phone ?? null,
+            k.waiter_id ?? null,
+            k.waiter_name || 'Staff',
+            k.ticket_type || 'new_order',
+            k.items_json || '[]',
+            k.reason ?? null,
+            k.status || 'pending',
+            k.created_at || new Date().toISOString(),
+            k.printed_at ?? null
           )
         );
       }

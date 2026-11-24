@@ -26,8 +26,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   try {
     await ensureSchema(env.DB);
     const drafts = await env.DB.prepare(
-      `SELECT d.id, d.draft_number, d.customer_id, d.dining_type, d.table_number, d.items_json, d.notes, d.created_by, d.created_at,
-              c.name AS customer_name, c.phone AS customer_phone
+      `SELECT d.id, d.draft_number, d.customer_id, d.dining_type, d.table_id, d.table_number, d.waiter_id, d.waiter_name, d.items_json, d.notes, d.created_by, d.created_at, d.updated_at,
+              COALESCE(c.name, d.customer_name) AS customer_name, COALESCE(c.phone, d.customer_phone) AS customer_phone
        FROM draft_orders d
        LEFT JOIN customers c ON d.customer_id = c.id
        ORDER BY d.created_at DESC`

@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS orders (
   table_number TEXT,
   extra_discount REAL NOT NULL DEFAULT 0,
   payment_method TEXT NOT NULL DEFAULT 'Cash/UPI',
+  waiter_id TEXT,
+  waiter_name TEXT,
   created_at TEXT NOT NULL,
   FOREIGN KEY (customer_id) REFERENCES customers(id),
   FOREIGN KEY (staff_id) REFERENCES users(id)
@@ -122,12 +124,18 @@ CREATE TABLE IF NOT EXISTS draft_orders (
   id TEXT PRIMARY KEY,
   draft_number TEXT NOT NULL,
   customer_id TEXT,
+  customer_name TEXT,
+  customer_phone TEXT,
   dining_type TEXT NOT NULL DEFAULT 'Dine-In',
+  table_id TEXT,
   table_number TEXT,
+  waiter_id TEXT,
+  waiter_name TEXT,
   items_json TEXT NOT NULL,
   notes TEXT,
   created_by TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  updated_at TEXT
 );
 
 -- 9. Points Ledger & Audit Trail
@@ -158,6 +166,25 @@ CREATE TABLE IF NOT EXISTS inventory_logs (
   FOREIGN KEY (menu_item_id) REFERENCES menu_items(id) ON DELETE CASCADE
 );
 
+-- 11. KOT Queue (Kitchen Order Tickets for Auto-Print & Audit)
+CREATE TABLE IF NOT EXISTS kot_queue (
+  id TEXT PRIMARY KEY,
+  kot_number TEXT NOT NULL,
+  draft_id TEXT,
+  table_id TEXT,
+  table_number TEXT NOT NULL,
+  customer_name TEXT,
+  customer_phone TEXT,
+  waiter_id TEXT,
+  waiter_name TEXT NOT NULL,
+  ticket_type TEXT NOT NULL CHECK (ticket_type IN ('new_order', 'add_on', 'cancel_item')),
+  items_json TEXT NOT NULL,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'printed')),
+  created_at TEXT NOT NULL,
+  printed_at TEXT
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
 CREATE INDEX IF NOT EXISTS idx_nfc_cards_uid ON nfc_cards(card_uid);
@@ -168,3 +195,4 @@ CREATE INDEX IF NOT EXISTS idx_inventory_logs_created_at ON inventory_logs(creat
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_item ON inventory_logs(menu_item_id);
 CREATE INDEX IF NOT EXISTS idx_cafe_tables_number ON cafe_tables(table_number);
 CREATE INDEX IF NOT EXISTS idx_cafe_tables_status ON cafe_tables(status);
+CREATE INDEX IF NOT EXISTS idx_kot_queue_status_created ON kot_queue(status, created_at ASC);

@@ -6,6 +6,7 @@ import {
   Users,
   LayoutDashboard,
   UtensilsCrossed,
+  ShoppingBag,
   WifiOff,
 } from 'lucide-react';
 import { User } from '../types';
@@ -13,6 +14,8 @@ import { OwnerDashboard } from './owner/OwnerDashboard';
 import { CustomersDirectory } from './customers/CustomersDirectory';
 import { CounterTerminal } from './counter/CounterTerminal';
 import { TablesBoard } from './tables/TablesBoard';
+import { OrderTerminal } from './orders/OrderTerminal';
+import { KotAutoPrinter } from './pos/KotAutoPrinter';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useRouter } from '../utils/router';
 
@@ -45,33 +48,35 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   // Handle route matching
   const isTables = path.startsWith('/tables');
-  const isPos = path.startsWith('/pos') || path.startsWith('/order');
+  const isOrder = path.startsWith('/order');
+  const isPos = path.startsWith('/pos');
   const isCustomers = path.startsWith('/customers');
   const isOwner = path.startsWith('/owner');
 
   // If path is root or unknown, navigate to default route
   useEffect(() => {
-    if (!isTables && !isPos && !isCustomers && !isOwner) {
+    if (!isTables && !isOrder && !isPos && !isCustomers && !isOwner) {
       navigate(defaultRoute, true);
     }
-  }, [path, isTables, isPos, isCustomers, isOwner, defaultRoute, navigate]);
+  }, [path, isTables, isOrder, isPos, isCustomers, isOwner, defaultRoute, navigate]);
 
   // Permissions visibility
   const canSeeTables = user.role === 'owner' || perms?.can_view_tables || perms?.can_take_orders;
-  const canSeePos = user.role === 'owner' || perms?.can_take_orders || perms?.can_settle_bills;
+  const canSeeOrder = user.role === 'owner' || perms?.can_take_orders;
+  const canSeePos = user.role === 'owner' || perms?.can_settle_bills;
   const canSeeCustomers = user.role === 'owner' || user.role === 'manager' || user.role === 'staff';
   const canSeeManagement = user.role === 'owner' || perms?.can_view_reports || perms?.can_manage_menu_stock;
 
   // Extract table parameter from /order/:table_id or /pos/:table_id
   const tableParam = useMemo(() => {
-    if (isPos) {
+    if (isPos || isOrder) {
       const parts = path.split('/').filter(Boolean);
       if (parts.length >= 2) {
         return decodeURIComponent(parts[1]);
       }
     }
     return undefined;
-  }, [path, isPos]);
+  }, [path, isPos, isOrder]);
 
   // Extract owner subtab parameter from /owner/:tab
   const ownerSubtab = useMemo(() => {
@@ -128,7 +133,10 @@ export const AppShell: React.FC<AppShellProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Dual KOT Auto-Printer Component (for Counter & Billing) */}
+          <KotAutoPrinter currentUser={user} isOnline={isOnline} />
+
           <div className="flex items-center gap-2 bg-[#F3EFEA] px-3.5 py-1.5 rounded-xl border border-[#E6E2DA] text-xs">
             <span className="font-semibold text-[#111111] hidden sm:inline">{user.name}</span>
             <span className={`px-2 py-0.5 rounded-md font-bold uppercase text-[10px] tracking-wider ${roleBadgeStyle()}`}>
@@ -159,6 +167,20 @@ export const AppShell: React.FC<AppShellProps> = ({
           >
             <UtensilsCrossed className="w-4 h-4" />
             <span>Floor & Tables</span>
+          </button>
+        )}
+
+        {canSeeOrder && (
+          <button
+            onClick={() => navigate('/order')}
+            className={`min-h-[44px] flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap cursor-pointer ${
+              isOrder
+                ? 'bg-[#111111] text-white shadow-xs'
+                : 'text-[#52525B] hover:text-[#111111] hover:bg-[#F3EFEA]'
+            }`}
+          >
+            <ShoppingBag className="w-4 h-4" />
+            <span>Take Order (KOT)</span>
           </button>
         )}
 
@@ -209,6 +231,14 @@ export const AppShell: React.FC<AppShellProps> = ({
       <main className="flex-1 p-4 sm:p-6 max-w-6xl w-full mx-auto">
         {isTables && (
           <TablesBoard currentUser={user} isOnline={isOnline} />
+        )}
+
+        {isOrder && (
+          <OrderTerminal
+            currentUser={user}
+            initialTableId={tableParam}
+            isOnline={isOnline}
+          />
         )}
 
         {isPos && (

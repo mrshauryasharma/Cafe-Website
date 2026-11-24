@@ -249,11 +249,21 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const previousBalance = customer.points_balance;
     const newBalance = Math.round((previousBalance - pointsRedeemed + pointsEarned) * 100) / 100;
 
-    // 5. Generate IDs
+    // 5. Generate IDs & Waiter attribution
     const orderId = crypto.randomUUID();
     const orderNumber = `ORD-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`;
     const now = new Date().toISOString();
     const staffAttribution = `${auth.user.name} (${auth.user.role})`;
+
+    let waiterId: string | null = null;
+    let waiterName: string | null = null;
+    if (draft_id) {
+      const draftRecord = await env.DB.prepare('SELECT waiter_id, waiter_name FROM draft_orders WHERE id = ?').bind(draft_id).first<{ waiter_id?: string; waiter_name?: string }>();
+      if (draftRecord) {
+        waiterId = draftRecord.waiter_id || null;
+        waiterName = draftRecord.waiter_name || null;
+      }
+    }
 
     // 6. Atomic D1 Batch Execution
     const statements: D1PreparedStatement[] = [];
@@ -261,8 +271,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // A. Insert Order
     statements.push(
       env.DB.prepare(
-        `INSERT INTO orders (id, order_number, customer_id, staff_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, idempotency_key, dining_type, table_number, extra_discount, payment_method, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO orders (id, order_number, customer_id, staff_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, idempotency_key, dining_type, table_number, extra_discount, payment_method, waiter_id, waiter_name, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         orderId,
         orderNumber,
@@ -278,6 +288,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         tableNumber,
         extraDiscount,
         paymentMethod,
+        waiterId,
+        waiterName,
         now
       )
     );

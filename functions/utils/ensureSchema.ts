@@ -163,6 +163,25 @@ export async function ensureSchema(db: D1Database): Promise<void> {
           FOREIGN KEY (menu_item_id) REFERENCES menu_items(id) ON DELETE CASCADE
         );
       `),
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS kot_queue (
+          id TEXT PRIMARY KEY,
+          kot_number TEXT NOT NULL,
+          draft_id TEXT,
+          table_id TEXT,
+          table_number TEXT NOT NULL,
+          customer_name TEXT,
+          customer_phone TEXT,
+          waiter_id TEXT,
+          waiter_name TEXT NOT NULL,
+          ticket_type TEXT NOT NULL CHECK (ticket_type IN ('new_order', 'add_on', 'cancel_item')),
+          items_json TEXT NOT NULL,
+          reason TEXT,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'printed')),
+          created_at TEXT NOT NULL,
+          printed_at TEXT
+        );
+      `),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_nfc_cards_uid ON nfc_cards(card_uid);`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);`),
@@ -172,6 +191,7 @@ export async function ensureSchema(db: D1Database): Promise<void> {
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_inventory_logs_item ON inventory_logs(menu_item_id);`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_cafe_tables_number ON cafe_tables(table_number);`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_cafe_tables_status ON cafe_tables(status);`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_kot_queue_status_created ON kot_queue(status, created_at ASC);`),
     ]);
 
     // Safe non-destructive column additions for existing tables
@@ -185,6 +205,14 @@ export async function ensureSchema(db: D1Database): Promise<void> {
       safeAddColumn(db, 'orders', 'table_number', 'TEXT'),
       safeAddColumn(db, 'orders', 'extra_discount', 'REAL NOT NULL DEFAULT 0'),
       safeAddColumn(db, 'orders', 'payment_method', "TEXT NOT NULL DEFAULT 'Cash/UPI'"),
+      safeAddColumn(db, 'orders', 'waiter_id', 'TEXT'),
+      safeAddColumn(db, 'orders', 'waiter_name', 'TEXT'),
+      safeAddColumn(db, 'draft_orders', 'table_id', 'TEXT'),
+      safeAddColumn(db, 'draft_orders', 'customer_name', 'TEXT'),
+      safeAddColumn(db, 'draft_orders', 'customer_phone', 'TEXT'),
+      safeAddColumn(db, 'draft_orders', 'waiter_id', 'TEXT'),
+      safeAddColumn(db, 'draft_orders', 'waiter_name', 'TEXT'),
+      safeAddColumn(db, 'draft_orders', 'updated_at', 'TEXT'),
       safeAddColumn(db, 'order_items', 'notes', 'TEXT'),
     ]);
 

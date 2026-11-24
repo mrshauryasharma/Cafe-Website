@@ -25,6 +25,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       ledgerResult,
       draftsResult,
       inventoryLogsResult,
+      kotQueueResult,
     ] = await Promise.all([
       env.DB.prepare('SELECT * FROM cafe_settings').all(),
       env.DB.prepare('SELECT * FROM users').all(),
@@ -37,6 +38,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       env.DB.prepare('SELECT * FROM points_ledger').all(),
       env.DB.prepare('SELECT * FROM draft_orders').all(),
       env.DB.prepare('SELECT * FROM inventory_logs').all(),
+      env.DB.prepare('SELECT * FROM kot_queue').all(),
     ]);
 
     const backupPayload = {
@@ -54,6 +56,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         points_ledger: ledgerResult.results || [],
         draft_orders: draftsResult.results || [],
         inventory_logs: inventoryLogsResult.results || [],
+        kot_queue: kotQueueResult.results || [],
       },
     };
 
