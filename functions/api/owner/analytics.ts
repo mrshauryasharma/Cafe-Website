@@ -70,8 +70,18 @@ export interface RecentLoyaltyActivity {
   created_at: string;
 }
 
+export interface WaiterPerformanceItem {
+  waiter_id: string;
+  waiter_name: string;
+  orders_count: number;
+  gross_sales: number;
+  net_revenue: number;
+  avg_order_value: number;
+  revenue_share_pct: number;
+}
+
 export interface AnalyticsResponse {
-  range: '7d' | '30d' | '90d' | 'all';
+  range: 'today' | '7d' | '30d' | '90d' | 'all';
   start_date: string;
   sales_kpis: SalesKpis;
   transaction_stats: TransactionStatPoint[];
@@ -80,6 +90,7 @@ export interface AnalyticsResponse {
   member_growth: MemberGrowthPoint[];
   demographics: DemographicsData;
   recent_activity: RecentLoyaltyActivity[];
+  waiter_performance: WaiterPerformanceItem[];
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -92,7 +103,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     const url = new URL(request.url);
     const rangeParam = url.searchParams.get('range') || '30d';
-    const range: '7d' | '30d' | '90d' | 'all' = ['7d', '30d', '90d', 'all'].includes(rangeParam)
+    const range: 'today' | '7d' | '30d' | '90d' | 'all' = ['today', '7d', '30d', '90d', 'all'].includes(rangeParam)
       ? (rangeParam as any)
       : '30d';
 
@@ -102,7 +113,19 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     let prevEndDate: string | null = null;
     let daysCount = 30;
 
-    if (range === '7d') {
+    if (range === 'today') {
+      daysCount = 1;
+      const istDateFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      const todayIst = istDateFormatter.format(now);
+      startDate = new Date(`${todayIst}T00:00:00+05:30`).toISOString();
+      prevStartDate = new Date(new Date(startDate).getTime() - 86400000).toISOString();
+      prevEndDate = startDate;
+    } else if (range === '7d') {
       daysCount = 7;
       startDate = new Date(now.getTime() - 7 * 86400000).toISOString();
       prevStartDate = new Date(now.getTime() - 14 * 86400000).toISOString();
@@ -202,9 +225,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       });
     }
 
-    // Fill continuous dates if 7d or 30d
+    // Fill continuous dates if today, 7d or 30d
     const transactionStats: TransactionStatPoint[] = [];
-    if (range === '7d' || range === '30d') {
+    if (range === 'today' || range === '7d' || range === '30d') {
       const nowMs = now.getTime();
       for (let i = daysCount - 1; i >= 0; i--) {
         const d = new Date(nowMs - i * 86400000).toISOString().slice(0, 10);
@@ -382,6 +405,44 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     const recentActivity = activityResult.results || [];
 
+    // 8. Waiter & Staff Sales Leaderboard
+    const waiterResult = await env.DB.prepare(`
+      SELECT
+        COALESCE(waiter_id, staff_id, 'counter') AS waiter_id,
+        COALESCE(waiter_name, 'Counter Staff') AS waiter_name,
+        COUNT(*) AS orders_count,
+        COALESCE(SUM(subtotal), 0) AS gross_sales,
+        COALESCE(SUM(final_amount), 0) AS net_revenue
+      FROM orders
+      WHERE created_at >= ?
+      GROUP BY COALESCE(waiter_id, staff_id, 'counter'), COALESCE(waiter_name, 'Counter Staff')
+      ORDER BY net_revenue DESC
+    `).bind(startDate).all<{
+      waiter_id: string;
+      waiter_name: string;
+      orders_count: number;
+      gross_sales: number;
+      net_revenue: number;
+    }>();
+
+    const totalPeriodNetRevenue = netRevenue > 0 ? netRevenue : 1;
+    const waiterPerformance: WaiterPerformanceItem[] = (waiterResult.results || []).map((w) => {
+      const ordersCount = Number(w.orders_count) || 0;
+      const grossSalesVal = Math.round(Number(w.gross_sales) * 100) / 100;
+      const netRevenueVal = Math.round(Number(w.net_revenue) * 100) / 100;
+      const aovVal = ordersCount > 0 ? Math.round((netRevenueVal / ordersCount) * 100) / 100 : 0;
+      const sharePct = Math.round((netRevenueVal / totalPeriodNetRevenue) * 1000) / 10;
+      return {
+        waiter_id: w.waiter_id,
+        waiter_name: w.waiter_name,
+        orders_count: ordersCount,
+        gross_sales: grossSalesVal,
+        net_revenue: netRevenueVal,
+        avg_order_value: aovVal,
+        revenue_share_pct: sharePct,
+      };
+    });
+
     const responseData: AnalyticsResponse = {
       range,
       start_date: startDate,
@@ -392,6 +453,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       member_growth: memberGrowth,
       demographics,
       recent_activity: recentActivity,
+      waiter_performance: waiterPerformance,
     };
 
     return new Response(JSON.stringify(responseData), {

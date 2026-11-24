@@ -10,14 +10,17 @@ import {
   RefreshCw,
   AlertCircle,
   Sparkles,
+  FileText,
 } from 'lucide-react';
 import { AnalyticsResponse } from '../../../functions/api/owner/analytics';
+import { ZReportModal } from './ZReportModal';
 
 export const AnalyticsReportsTab: React.FC = () => {
-  const [range, setRange] = useState<'7d' | '30d' | '90d' | 'all'>('30d');
+  const [range, setRange] = useState<'today' | '7d' | '30d' | '90d' | 'all'>('30d');
   const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showZReportModal, setShowZReportModal] = useState<boolean>(false);
 
   // Active hover states for charts
   const [hoveredBarIndex, setHoveredBarIndex] = useState<number | null>(null);
@@ -91,6 +94,18 @@ export const AnalyticsReportsTab: React.FC = () => {
     lines.push(`First-Time Members (1 Visit),${data.demographics.visit_segments.first_time}`);
     lines.push(`Regular Members (2-4 Visits),${data.demographics.visit_segments.regular}`);
     lines.push(`VIP Loyal Members (5+ Visits),${data.demographics.visit_segments.vip_loyal}`);
+    lines.push('');
+
+    // Waiter Performance Leaderboard
+    if (data.waiter_performance && data.waiter_performance.length > 0) {
+      lines.push(`--- WAITER & STAFF SALES LEADERBOARD ---`);
+      lines.push(`Rank,Staff Name,Staff ID,Orders Served,Gross Sales (INR),Net Revenue (INR),Avg Bill (INR),Revenue Share (%)`);
+      data.waiter_performance.forEach((w, idx) => {
+        lines.push(
+          `${idx + 1},"${w.waiter_name}","${w.waiter_id}",${w.orders_count},${w.gross_sales},${w.net_revenue},${w.avg_order_value},${w.revenue_share_pct}%`
+        );
+      });
+    }
 
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -159,7 +174,7 @@ export const AnalyticsReportsTab: React.FC = () => {
         {/* Date Range Selector & Actions */}
         <div className="flex items-center gap-2 flex-wrap self-end sm:self-auto">
           <div className="flex items-center p-1 bg-[#F3EFEA] border border-[#E6E2DA] rounded-xl text-xs font-semibold">
-            {(['7d', '30d', '90d', 'all'] as const).map((r) => (
+            {(['today', '7d', '30d', '90d', 'all'] as const).map((r) => (
               <button
                 key={r}
                 type="button"
@@ -170,10 +185,28 @@ export const AnalyticsReportsTab: React.FC = () => {
                     : 'text-[#52525B] hover:text-[#111111]'
                 }`}
               >
-                {r === '7d' ? '7 Days' : r === '30d' ? '30 Days' : r === '90d' ? '90 Days' : 'All Time'}
+                {r === 'today'
+                  ? 'Today'
+                  : r === '7d'
+                  ? '7 Days'
+                  : r === '30d'
+                  ? '30 Days'
+                  : r === '90d'
+                  ? '90 Days'
+                  : 'All Time'}
               </button>
             ))}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setShowZReportModal(true)}
+            title="Open Day-End Closing Z-Report and 80mm thermal register printout"
+            className="min-h-[38px] px-3.5 py-1.5 bg-[#111111] hover:bg-[#262626] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs whitespace-nowrap"
+          >
+            <FileText className="w-3.5 h-3.5 text-white" />
+            <span>Day-End Z-Report</span>
+          </button>
 
           <button
             type="button"
@@ -753,7 +786,96 @@ export const AnalyticsReportsTab: React.FC = () => {
           </div>
         </div>
 
-        {/* 5. RECENT LOYALTY ACTIVITY AUDIT TABLE */}
+        {/* 5. WAITER & STAFF SALES LEADERBOARD */}
+        <div className="pt-2 border-t border-[#E6E2DA] space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-[#111111]" />
+              <h4 className="font-bold text-[#111111] text-sm font-serif">
+                Waiter &amp; Staff Sales Leaderboard
+              </h4>
+            </div>
+            {data?.waiter_performance && data.waiter_performance.length > 0 && (
+              <span className="text-xs font-mono font-bold text-[#166534] bg-[#ECFDF5] border border-[#BBF7D0] px-2 py-0.5 rounded-lg tabular-nums">
+                {data.waiter_performance.length} Staff Ranked
+              </span>
+            )}
+          </div>
+
+          {!data || !data.waiter_performance || data.waiter_performance.length === 0 ? (
+            <div className="py-8 text-center text-xs text-[#71717A] italic font-serif">
+              No staff-attributed sales recorded for this period.
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-[#E6E2DA] rounded-xl">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="bg-[#FAF9F6] border-b border-[#E6E2DA] text-[#52525B] uppercase font-bold text-[10px] tracking-wider">
+                    <th className="py-2.5 px-3">Rank</th>
+                    <th className="py-2.5 px-3">Staff / Server</th>
+                    <th className="py-2.5 px-3 text-right">Orders Served</th>
+                    <th className="py-2.5 px-3 text-right">Gross Sales</th>
+                    <th className="py-2.5 px-3 text-right">Net Revenue</th>
+                    <th className="py-2.5 px-3 text-right">Avg Bill (AOV)</th>
+                    <th className="py-2.5 px-3 min-w-[140px]">Revenue Share</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E6E2DA]">
+                  {data.waiter_performance.map((w, idx) => (
+                    <tr key={w.waiter_id || idx} className="hover:bg-[#FAF9F6] transition-colors">
+                      <td className="py-3 px-3">
+                        <span
+                          className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold font-mono ${
+                            idx === 0
+                              ? 'bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]'
+                              : idx === 1
+                              ? 'bg-[#F3EFEA] text-[#111111] border border-[#E6E2DA]'
+                              : idx === 2
+                              ? 'bg-[#FAF9F6] text-[#71717A] border border-[#E6E2DA]'
+                              : 'text-[#71717A]'
+                          }`}
+                        >
+                          #{idx + 1}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <p className="font-bold text-[#111111] font-serif text-sm">{w.waiter_name}</p>
+                        <span className="text-[10px] text-[#71717A] font-mono">ID: {w.waiter_id}</span>
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-bold text-[#111111] tabular-nums">
+                        {w.orders_count}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono text-[#52525B] tabular-nums">
+                        ₹{w.gross_sales}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-bold text-[#166534] tabular-nums text-sm">
+                        ₹{w.net_revenue}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono text-[#111111] tabular-nums">
+                        ₹{w.avg_order_value}
+                      </td>
+                      <td className="py-3 px-3">
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[10px] font-mono tabular-nums text-[#52525B]">
+                            <span>{w.revenue_share_pct}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-[#F3EFEA] rounded-full overflow-hidden border border-[#E6E2DA]">
+                            <div
+                              className="h-full bg-[#111111] rounded-full transition-all duration-500"
+                              style={{ width: `${Math.min(100, Math.max(2, w.revenue_share_pct))}%` }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* 6. RECENT LOYALTY ACTIVITY AUDIT TABLE */}
         <div className="pt-2 border-t border-[#E6E2DA] space-y-2.5">
           <div className="flex items-center justify-between">
             <h4 className="font-bold text-[#111111] text-sm font-serif">
@@ -850,6 +972,12 @@ export const AnalyticsReportsTab: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* 7. DAY-END CLOSING Z-REPORT MODAL (80mm Thermal Ready) */}
+      <ZReportModal
+        isOpen={showZReportModal}
+        onClose={() => setShowZReportModal(false)}
+      />
     </div>
   );
 };
