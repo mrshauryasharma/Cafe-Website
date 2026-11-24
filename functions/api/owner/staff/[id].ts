@@ -126,3 +126,6 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
     );
   }
 };
+
+export const onRequestPatch = onRequestPut;
+
