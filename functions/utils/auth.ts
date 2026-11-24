@@ -1,11 +1,13 @@
-import { Env, UserSession } from '../types';
+import { Env, UserSession, UserRole, UserPermissions } from '../types';
 import { parseCookies, verifyJwt, DEFAULT_JWT_SECRET } from './crypto';
+import { resolveUserPermissions } from './permissions';
 
 export interface AuthenticatedUser {
   id: string;
   name: string;
   username: string;
-  role: 'owner' | 'staff';
+  role: UserRole;
+  permissions: UserPermissions;
 }
 
 /**
@@ -34,12 +36,13 @@ export async function authenticate(
   }
 
   const user = await env.DB.prepare(
-    'SELECT id, name, username, role, is_active FROM users WHERE id = ?'
+    'SELECT id, name, username, role, permissions_json, is_active FROM users WHERE id = ?'
   ).bind(session.id).first<{
     id: string;
     name: string;
     username: string;
-    role: 'owner' | 'staff';
+    role: UserRole;
+    permissions_json?: string;
     is_active: number;
   }>();
 
@@ -50,12 +53,15 @@ export async function authenticate(
     );
   }
 
+  const permissions = resolveUserPermissions(user.role, user.permissions_json);
+
   return {
     user: {
       id: user.id,
       name: user.name,
       username: user.username,
       role: user.role,
+      permissions,
     },
   };
 }
@@ -80,4 +86,27 @@ export async function requireOwner(
   }
 
   return authResult;
+}
+
+/**
+ * Enforces that the request is made by an active user with a specific permission (or owner).
+ */
+export async function requirePermission(
+  request: Request,
+  env: Env,
+  permission: keyof UserPermissions
+): Promise<{ user: AuthenticatedUser } | Response> {
+  const authResult = await authenticate(request, env);
+  if (authResult instanceof Response) {
+    return authResult;
+  }
+
+  if (authResult.user.role === 'owner' || authResult.user.permissions[permission] === true) {
+    return authResult;
+  }
+
+  return new Response(
+    JSON.stringify({ error: `Forbidden: Missing required permission '${permission}'` }),
+    { status: 403, headers: { 'Content-Type': 'application/json' } }
+  );
 }

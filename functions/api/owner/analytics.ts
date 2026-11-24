@@ -1,5 +1,5 @@
 import { Env } from '../../types';
-import { requireOwner } from '../../utils/auth';
+import { requirePermission } from '../../utils/auth';
 import { ensureSchema } from '../../utils/ensureSchema';
 
 export interface SalesKpis {
@@ -84,7 +84,7 @@ export interface AnalyticsResponse {
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
-  const auth = await requireOwner(request, env);
+  const auth = await requirePermission(request, env, 'can_view_reports');
   if (auth instanceof Response) return auth;
 
   try {

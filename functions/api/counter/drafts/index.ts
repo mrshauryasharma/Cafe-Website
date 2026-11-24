@@ -109,6 +109,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           body.id
         ).run();
 
+        if (tableNumber) {
+          await env.DB.prepare(
+            "UPDATE cafe_tables SET status = 'occupied', active_order_id = ? WHERE table_number = ? OR table_name = ?"
+          ).bind(existing.id, tableNumber, tableNumber).run();
+        }
+
         return new Response(
           JSON.stringify({
             success: true,
@@ -146,6 +152,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       staffAttribution,
       now
     ).run();
+
+    if (tableNumber) {
+      await env.DB.prepare(
+        "UPDATE cafe_tables SET status = 'occupied', active_order_id = ? WHERE table_number = ? OR table_name = ?"
+      ).bind(draftId, tableNumber, tableNumber).run();
+    }
 
     return new Response(
       JSON.stringify({

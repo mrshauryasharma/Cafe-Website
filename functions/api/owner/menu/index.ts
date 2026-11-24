@@ -1,5 +1,5 @@
 import { Env } from '../../../types';
-import { requireOwner } from '../../../utils/auth';
+import { requirePermission } from '../../../utils/auth';
 
 export interface MenuItem {
   id: string;
@@ -16,7 +16,7 @@ export interface MenuItem {
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
-  const auth = await requireOwner(request, env);
+  const auth = await requirePermission(request, env, 'can_manage_menu_stock');
   if (auth instanceof Response) return auth;
 
   try {
@@ -38,7 +38,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
-  const auth = await requireOwner(request, env);
+  const auth = await requirePermission(request, env, 'can_manage_menu_stock');
   if (auth instanceof Response) return auth;
 
   try {

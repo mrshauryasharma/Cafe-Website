@@ -1,17 +1,20 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   Coffee,
   LogOut,
   ScanLine,
   Users,
   LayoutDashboard,
+  UtensilsCrossed,
   WifiOff,
 } from 'lucide-react';
 import { User } from '../types';
 import { OwnerDashboard } from './owner/OwnerDashboard';
 import { CustomersDirectory } from './customers/CustomersDirectory';
 import { CounterTerminal } from './counter/CounterTerminal';
+import { TablesBoard } from './tables/TablesBoard';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { useRouter } from '../utils/router';
 
 interface AppShellProps {
   user: User;
@@ -28,8 +31,74 @@ export const AppShell: React.FC<AppShellProps> = ({
   onLogout,
   onCafeNameChange,
 }) => {
-  const [currentTab, setCurrentTab] = useState<'scan' | 'customers' | 'dashboard'>('scan');
+  const { path, navigate } = useRouter();
   const isOnline = useOnlineStatus();
+  const perms = user.permissions;
+
+  // Determine user default route
+  const defaultRoute = useMemo(() => {
+    if (user.role === 'waiter') return '/tables';
+    if (user.role === 'staff') return '/pos';
+    if (user.role === 'manager') return '/tables';
+    return '/owner/reports';
+  }, [user.role]);
+
+  // Handle route matching
+  const isTables = path.startsWith('/tables');
+  const isPos = path.startsWith('/pos') || path.startsWith('/order');
+  const isCustomers = path.startsWith('/customers');
+  const isOwner = path.startsWith('/owner');
+
+  // If path is root or unknown, navigate to default route
+  useEffect(() => {
+    if (!isTables && !isPos && !isCustomers && !isOwner) {
+      navigate(defaultRoute, true);
+    }
+  }, [path, isTables, isPos, isCustomers, isOwner, defaultRoute, navigate]);
+
+  // Permissions visibility
+  const canSeeTables = user.role === 'owner' || perms?.can_view_tables || perms?.can_take_orders;
+  const canSeePos = user.role === 'owner' || perms?.can_take_orders || perms?.can_settle_bills;
+  const canSeeCustomers = user.role === 'owner' || user.role === 'manager' || user.role === 'staff';
+  const canSeeManagement = user.role === 'owner' || perms?.can_view_reports || perms?.can_manage_menu_stock;
+
+  // Extract table parameter from /order/:table_id or /pos/:table_id
+  const tableParam = useMemo(() => {
+    if (isPos) {
+      const parts = path.split('/').filter(Boolean);
+      if (parts.length >= 2) {
+        return decodeURIComponent(parts[1]);
+      }
+    }
+    return undefined;
+  }, [path, isPos]);
+
+  // Extract owner subtab parameter from /owner/:tab
+  const ownerSubtab = useMemo(() => {
+    if (isOwner) {
+      const parts = path.split('/').filter(Boolean);
+      if (parts.length >= 2) {
+        return parts[1];
+      }
+    }
+    return 'reports';
+  }, [path, isOwner]);
+
+  // Role Badge Styling
+  const roleBadgeStyle = () => {
+    switch (user.role) {
+      case 'owner':
+        return 'bg-[#111111] text-white';
+      case 'manager':
+        return 'bg-[#7C3AED]/10 text-[#6D28D9] border border-[#DDD6FE]';
+      case 'staff':
+        return 'bg-[#ECFDF5] text-[#166534] border border-[#BBF7D0]';
+      case 'waiter':
+        return 'bg-[#EFF6FF] text-[#1D4ED8] border border-[#BFDBFE]';
+      default:
+        return 'bg-[#F3EFEA] text-[#111111] border border-[#E6E2DA]';
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF9F6] text-[#111111]">
@@ -38,7 +107,7 @@ export const AppShell: React.FC<AppShellProps> = ({
         <div className="bg-[#FFFBEB] text-[#92400E] border-b border-[#FDE68A] text-xs font-semibold px-4 py-2.5 flex items-center justify-center gap-2 shadow-sm sticky top-0 z-50">
           <WifiOff className="w-4 h-4 flex-shrink-0 text-[#92400E]" />
           <span>
-            ⚠️ Offline Mode — Read-only shell active. New orders, point redemptions, and database mutations are temporarily locked.
+            Offline Mode — Read-only shell active. New orders, point redemptions, and database mutations are temporarily locked.
           </span>
         </div>
       )}
@@ -54,7 +123,7 @@ export const AppShell: React.FC<AppShellProps> = ({
               {cafeName || 'Kimmo’s Kitchen'}
             </h1>
             <p className="text-[11px] uppercase tracking-widest text-[#52525B] font-sans font-medium">
-              Loyalty & Counter System
+              POS, Floor & Loyalty Terminal
             </p>
           </div>
         </div>
@@ -62,13 +131,7 @@ export const AppShell: React.FC<AppShellProps> = ({
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 bg-[#F3EFEA] px-3.5 py-1.5 rounded-xl border border-[#E6E2DA] text-xs">
             <span className="font-semibold text-[#111111] hidden sm:inline">{user.name}</span>
-            <span
-              className={`px-2 py-0.5 rounded-md font-bold uppercase text-[10px] tracking-wider ${
-                user.role === 'owner'
-                  ? 'bg-[#111111] text-white'
-                  : 'bg-[#ECFDF5] text-[#166534] border border-[#BBF7D0]'
-              }`}
-            >
+            <span className={`px-2 py-0.5 rounded-md font-bold uppercase text-[10px] tracking-wider ${roleBadgeStyle()}`}>
               {user.role}
             </span>
           </div>
@@ -83,59 +146,90 @@ export const AppShell: React.FC<AppShellProps> = ({
         </div>
       </header>
 
-      {/* Navigation Bar */}
+      {/* Clean Navigation Bar */}
       <nav className="bg-white border-b border-[#E6E2DA] px-4 sm:px-6 py-2 flex items-center gap-2 overflow-x-auto">
-        <button
-          onClick={() => setCurrentTab('scan')}
-          className={`min-h-[44px] flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap cursor-pointer ${
-            currentTab === 'scan'
-              ? 'bg-[#111111] text-white shadow-xs'
-              : 'text-[#52525B] hover:text-[#111111] hover:bg-[#F3EFEA]'
-          }`}
-        >
-          <ScanLine className="w-4 h-4" />
-          <span>Counter Scan & Billing</span>
-        </button>
-
-        <button
-          onClick={() => setCurrentTab('customers')}
-          className={`min-h-[44px] flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap cursor-pointer ${
-            currentTab === 'customers'
-              ? 'bg-[#111111] text-white shadow-xs'
-              : 'text-[#52525B] hover:text-[#111111] hover:bg-[#F3EFEA]'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Customers</span>
-        </button>
-
-        {user.role === 'owner' && (
+        {canSeeTables && (
           <button
-            onClick={() => setCurrentTab('dashboard')}
+            onClick={() => navigate('/tables')}
             className={`min-h-[44px] flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap cursor-pointer ${
-              currentTab === 'dashboard'
+              isTables
+                ? 'bg-[#111111] text-white shadow-xs'
+                : 'text-[#52525B] hover:text-[#111111] hover:bg-[#F3EFEA]'
+            }`}
+          >
+            <UtensilsCrossed className="w-4 h-4" />
+            <span>Floor & Tables</span>
+          </button>
+        )}
+
+        {canSeePos && (
+          <button
+            onClick={() => navigate('/pos')}
+            className={`min-h-[44px] flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap cursor-pointer ${
+              isPos
+                ? 'bg-[#111111] text-white shadow-xs'
+                : 'text-[#52525B] hover:text-[#111111] hover:bg-[#F3EFEA]'
+            }`}
+          >
+            <ScanLine className="w-4 h-4" />
+            <span>Counter POS & Billing</span>
+          </button>
+        )}
+
+        {canSeeCustomers && (
+          <button
+            onClick={() => navigate('/customers')}
+            className={`min-h-[44px] flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap cursor-pointer ${
+              isCustomers
+                ? 'bg-[#111111] text-white shadow-xs'
+                : 'text-[#52525B] hover:text-[#111111] hover:bg-[#F3EFEA]'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Customers</span>
+          </button>
+        )}
+
+        {canSeeManagement && (
+          <button
+            onClick={() => navigate('/owner/reports')}
+            className={`min-h-[44px] flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap cursor-pointer ${
+              isOwner
                 ? 'bg-[#111111] text-white shadow-xs'
                 : 'text-[#52525B] hover:text-[#111111] hover:bg-[#F3EFEA]'
             }`}
           >
             <LayoutDashboard className="w-4 h-4" />
-            <span>Owner Dashboard</span>
+            <span>Management</span>
           </button>
         )}
       </nav>
 
       {/* Main Content Area */}
       <main className="flex-1 p-4 sm:p-6 max-w-6xl w-full mx-auto">
-        {currentTab === 'scan' && (
-          <CounterTerminal currentUser={user} initialCardUid={initialCardUid} isOnline={isOnline} />
+        {isTables && (
+          <TablesBoard currentUser={user} isOnline={isOnline} />
         )}
 
-        {currentTab === 'customers' && (
+        {isPos && (
+          <CounterTerminal
+            currentUser={user}
+            initialCardUid={initialCardUid}
+            initialTableId={tableParam}
+            isOnline={isOnline}
+          />
+        )}
+
+        {isCustomers && (
           <CustomersDirectory currentUser={user} isOnline={isOnline} />
         )}
 
-        {currentTab === 'dashboard' && user.role === 'owner' && (
-          <OwnerDashboard onCafeNameChange={onCafeNameChange} />
+        {isOwner && (
+          <OwnerDashboard
+            currentUser={user}
+            initialTab={ownerSubtab}
+            onCafeNameChange={onCafeNameChange}
+          />
         )}
       </main>
     </div>

@@ -1,5 +1,6 @@
-import { Env, UserSession } from '../../types';
+import { Env, UserSession, UserRole } from '../../types';
 import { parseCookies, verifyJwt, DEFAULT_JWT_SECRET } from '../../utils/crypto';
+import { resolveUserPermissions } from '../../utils/permissions';
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   try {
@@ -24,12 +25,13 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     // Verify user is still active in database
     const user = await env.DB.prepare(
-      'SELECT id, name, username, role, is_active FROM users WHERE id = ?'
+      'SELECT id, name, username, role, permissions_json, is_active FROM users WHERE id = ?'
     ).bind(session.id).first<{
       id: string;
       name: string;
       username: string;
-      role: 'owner' | 'staff';
+      role: UserRole;
+      permissions_json?: string;
       is_active: number;
     }>();
 
@@ -39,6 +41,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         { status: 401, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    const permissions = resolveUserPermissions(user.role, user.permissions_json);
 
     // Fetch cafe_name
     let cafeName = 'Kimmo’s Kitchen';
@@ -58,6 +62,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
           name: user.name,
           username: user.username,
           role: user.role,
+          permissions,
         },
         cafe_name: cafeName,
       }),

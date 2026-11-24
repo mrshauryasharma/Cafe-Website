@@ -52,6 +52,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const auth = await authenticate(request, env);
   if (auth instanceof Response) return auth;
 
+  if (auth.user.role !== 'owner' && !auth.user.permissions.can_settle_bills) {
+    return new Response(JSON.stringify({ error: 'Forbidden: Insufficient permissions to settle bills' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   try {
     await ensureSchema(env.DB);
     const body = (await request.json()) as CheckoutPayload;
@@ -67,6 +74,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       payment_method,
       draft_id,
     } = body;
+
+    if (extra_discount && extra_discount > 0 && auth.user.role !== 'owner' && !auth.user.permissions.can_apply_discounts) {
+      return new Response(JSON.stringify({ error: 'Forbidden: Insufficient permissions to apply custom discounts' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     if (!customer_id) {
       return new Response(JSON.stringify({ error: 'Customer is required for checkout' }), {
@@ -370,6 +384,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           staffAttribution,
           now
         )
+      );
+    }
+
+    // If checking out a table, mark table vacant
+    if (table_number) {
+      statements.push(
+        env.DB.prepare(
+          "UPDATE cafe_tables SET status = 'vacant', active_order_id = NULL WHERE table_number = ? OR table_name = ?"
+        ).bind(table_number, table_number)
       );
     }
 

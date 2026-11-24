@@ -1,5 +1,5 @@
 import { Env } from '../../../types';
-import { requireOwner } from '../../../utils/auth';
+import { requirePermission } from '../../../utils/auth';
 import { ensureSchema } from '../../../utils/ensureSchema';
 import { MenuItem } from '../menu';
 
@@ -14,7 +14,7 @@ interface AdjustPayload {
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
-  const auth = await requireOwner(request, env);
+  const auth = await requirePermission(request, env, 'can_manage_menu_stock');
   if (auth instanceof Response) return auth;
 
   try {

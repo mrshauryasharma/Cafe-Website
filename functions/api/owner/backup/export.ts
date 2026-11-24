@@ -16,6 +16,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     const [
       settingsResult,
       usersResult,
+      tablesResult,
       menuResult,
       customersResult,
       cardsResult,
@@ -27,6 +28,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     ] = await Promise.all([
       env.DB.prepare('SELECT * FROM cafe_settings').all(),
       env.DB.prepare('SELECT * FROM users').all(),
+      env.DB.prepare('SELECT * FROM cafe_tables').all(),
       env.DB.prepare('SELECT * FROM menu_items').all(),
       env.DB.prepare('SELECT * FROM customers').all(),
       env.DB.prepare('SELECT * FROM nfc_cards').all(),
@@ -43,6 +45,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       data: {
         cafe_settings: settingsResult.results || [],
         users: usersResult.results || [],
+        cafe_tables: tablesResult.results || [],
         menu_items: menuResult.results || [],
         customers: customersResult.results || [],
         nfc_cards: cardsResult.results || [],

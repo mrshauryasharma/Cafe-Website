@@ -28,8 +28,23 @@ export async function ensureSchema(db: D1Database): Promise<void> {
           name TEXT NOT NULL,
           username TEXT UNIQUE NOT NULL,
           password_hash TEXT NOT NULL,
-          role TEXT NOT NULL CHECK (role IN ('owner', 'staff')),
+          role TEXT NOT NULL CHECK (role IN ('owner', 'manager', 'staff', 'waiter')),
+          permissions_json TEXT NOT NULL DEFAULT '{}',
           is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL
+        );
+      `),
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS cafe_tables (
+          id TEXT PRIMARY KEY,
+          table_number TEXT NOT NULL UNIQUE,
+          table_name TEXT NOT NULL,
+          section TEXT NOT NULL DEFAULT 'Main Floor',
+          capacity INTEGER NOT NULL DEFAULT 4,
+          status TEXT NOT NULL DEFAULT 'vacant' CHECK (status IN ('vacant', 'occupied')),
+          active_order_id TEXT,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL
         );
       `),
@@ -155,10 +170,13 @@ export async function ensureSchema(db: D1Database): Promise<void> {
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_draft_orders_created ON draft_orders(created_at);`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_inventory_logs_created_at ON inventory_logs(created_at DESC);`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_inventory_logs_item ON inventory_logs(menu_item_id);`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_cafe_tables_number ON cafe_tables(table_number);`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_cafe_tables_status ON cafe_tables(status);`),
     ]);
 
     // Safe non-destructive column additions for existing tables
     await Promise.all([
+      safeAddColumn(db, 'users', 'permissions_json', "TEXT NOT NULL DEFAULT '{}'"),
       safeAddColumn(db, 'menu_items', 'image_url', 'TEXT'),
       safeAddColumn(db, 'menu_items', 'stock_qty', 'INTEGER NOT NULL DEFAULT 100'),
       safeAddColumn(db, 'menu_items', 'max_stock', 'INTEGER NOT NULL DEFAULT 100'),
@@ -169,6 +187,12 @@ export async function ensureSchema(db: D1Database): Promise<void> {
       safeAddColumn(db, 'orders', 'payment_method', "TEXT NOT NULL DEFAULT 'Cash/UPI'"),
       safeAddColumn(db, 'order_items', 'notes', 'TEXT'),
     ]);
+
+    // Check if users table needs migration for roles (manager/waiter)
+    await migrateUsersSchemaIfNeeded(db);
+
+    // Seed default dining tables if table is empty
+    await seedDefaultTablesIfEmpty(db);
 
     schemaEnsured = true;
   } catch (err) {
@@ -185,5 +209,92 @@ async function safeAddColumn(db: D1Database, table: string, column: string, type
     }
   } catch (err) {
     // Ignore if column already exists or table not ready
+  }
+}
+
+async function migrateUsersSchemaIfNeeded(db: D1Database): Promise<void> {
+  try {
+    const tableDef = await db
+      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'")
+      .first<{ sql: string }>();
+
+    if (!tableDef || !tableDef.sql) return;
+
+    const sql = tableDef.sql;
+    const hasWaiter = sql.includes("'waiter'");
+    const hasManager = sql.includes("'manager'");
+
+    if (!hasWaiter || !hasManager) {
+      console.log('Migrating users table to support manager/waiter roles...');
+
+      const columnsInfo = await db.prepare('PRAGMA table_info(users)').all<{ name: string }>();
+      const existingCols = columnsInfo.results?.map((c) => c.name) || [];
+      const hasOldPermissions = existingCols.includes('permissions_json');
+
+      const selectCols = `id, name, username, password_hash, role, ${
+        hasOldPermissions ? "COALESCE(permissions_json, '{}')" : "'{}'"
+      } AS permissions_json, is_active, created_at`;
+
+      await db.batch([
+        db.prepare('PRAGMA foreign_keys=OFF'),
+        db.prepare(`
+          CREATE TABLE users_new (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('owner', 'manager', 'staff', 'waiter')),
+            permissions_json TEXT NOT NULL DEFAULT '{}',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+          )
+        `),
+        db.prepare(`
+          INSERT INTO users_new (id, name, username, password_hash, role, permissions_json, is_active, created_at)
+          SELECT ${selectCols} FROM users
+        `),
+        db.prepare('DROP TABLE users'),
+        db.prepare('ALTER TABLE users_new RENAME TO users'),
+        db.prepare('PRAGMA foreign_keys=ON'),
+      ]);
+      console.log('Users table migrated successfully.');
+    }
+  } catch (err) {
+    console.error('Error during users table migration check:', err);
+  }
+}
+
+async function seedDefaultTablesIfEmpty(db: D1Database): Promise<void> {
+  try {
+    const countRes = await db.prepare('SELECT COUNT(*) as count FROM cafe_tables').first<{ count: number }>();
+    if (!countRes || countRes.count === 0) {
+      const now = new Date().toISOString();
+      const stmts: D1PreparedStatement[] = [];
+
+      // Takeaway Counter
+      stmts.push(
+        db.prepare(
+          `INSERT OR IGNORE INTO cafe_tables (id, table_number, table_name, section, capacity, status, is_active, sort_order, created_at)
+           VALUES (?, ?, ?, ?, ?, 'vacant', 1, ?, ?)`
+        ).bind(crypto.randomUUID(), 'TA-1', 'Takeaway', 'Counter', 0, 0, now)
+      );
+
+      // Tables 1 to 12
+      for (let i = 1; i <= 12; i++) {
+        const tableNum = `T-${String(i).padStart(2, '0')}`;
+        const tableName = `Table ${i}`;
+        stmts.push(
+          db.prepare(
+            `INSERT OR IGNORE INTO cafe_tables (id, table_number, table_name, section, capacity, status, is_active, sort_order, created_at)
+             VALUES (?, ?, ?, 'Main Floor', 4, 'vacant', 1, ?, ?)`
+          ).bind(crypto.randomUUID(), tableNum, tableName, i, now)
+        );
+      }
+
+      await db.batch(stmts);
+      console.log('Default cafe_tables seeded successfully.');
+    }
+  } catch (err) {
+    console.error('Error seeding cafe_tables:', err);
   }
 }

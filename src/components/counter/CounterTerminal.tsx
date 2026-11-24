@@ -40,6 +40,7 @@ import { detectNfcCapabilities, normalizeCardInput } from '../../utils/nfcPlatfo
 interface CounterTerminalProps {
   currentUser: AuthUser;
   initialCardUid?: string;
+  initialTableId?: string;
   isOnline?: boolean;
 }
 
@@ -59,6 +60,7 @@ interface KotTicket {
 export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   currentUser,
   initialCardUid,
+  initialTableId,
   isOnline = true,
 }) => {
   // Settings & Menu Items cache
@@ -82,7 +84,8 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   const [menuSearch, setMenuSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [diningType, setDiningType] = useState<'dine_in' | 'takeaway' | 'delivery'>('dine_in');
-  const [tableNumber, setTableNumber] = useState('Table 1');
+  const [tableNumber, setTableNumber] = useState(initialTableId || 'Table 1');
+  const [availableTables, setAvailableTables] = useState<{ id: string; table_number: string; table_name: string; section: string }[]>([]);
   const [extraDiscount, setExtraDiscount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'upi' | 'card'>('cash');
   const [redeemPointsToggle, setRedeemPointsToggle] = useState(false);
@@ -144,11 +147,22 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     const initCounter = async () => {
       try {
         setLoadingInit(true);
-        const res = await fetch('/api/counter/init');
-        if (!res.ok) throw new Error('Failed to load menu & settings');
-        const data = (await res.json()) as { menu_items: MenuItem[]; settings: CafeSettingsRow };
+        const [counterRes, tablesRes] = await Promise.all([
+          fetch('/api/counter/init'),
+          fetch('/api/tables'),
+        ]);
+
+        if (!counterRes.ok) throw new Error('Failed to load menu & settings');
+        const data = (await counterRes.json()) as { menu_items: MenuItem[]; settings: CafeSettingsRow };
         setMenuItems(data.menu_items || []);
         setSettings(data.settings || null);
+
+        if (tablesRes.ok) {
+          const tablesData = (await tablesRes.json()) as any[];
+          if (Array.isArray(tablesData) && tablesData.length > 0) {
+            setAvailableTables(tablesData);
+          }
+        }
       } catch (err: any) {
         setError(err.message || 'Counter init failed');
       } finally {
@@ -159,6 +173,13 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     initCounter();
     fetchDrafts();
   }, []);
+
+  useEffect(() => {
+    if (initialTableId) {
+      setTableNumber(initialTableId);
+      setDiningType('dine_in');
+    }
+  }, [initialTableId]);
 
   // 2. Auto-scan if initialCardUid is provided
   useEffect(() => {
@@ -1212,28 +1233,36 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                     onChange={(e) => setTableNumber(e.target.value)}
                     className="flex-1 min-h-[36px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-3 py-1 text-xs text-[#111111] font-serif focus:outline-none focus:border-[#111111] focus:bg-white"
                   >
-                    {[
-                      'Table 1',
-                      'Table 2',
-                      'Table 3',
-                      'Table 4',
-                      'Table 5',
-                      'Table 6',
-                      'Table 7',
-                      'Table 8',
-                      'Table 9',
-                      'Table 10',
-                      'Table 11',
-                      'Table 12',
-                      'Balcony 1',
-                      'Balcony 2',
-                      'Garden Patio',
-                      'Bar Counter',
-                    ].map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
+                    {availableTables.length > 0 ? (
+                      availableTables.map((t) => (
+                        <option key={t.id} value={t.table_number}>
+                          {t.table_name} ({t.table_number}) — {t.section}
+                        </option>
+                      ))
+                    ) : (
+                      [
+                        'Table 1',
+                        'Table 2',
+                        'Table 3',
+                        'Table 4',
+                        'Table 5',
+                        'Table 6',
+                        'Table 7',
+                        'Table 8',
+                        'Table 9',
+                        'Table 10',
+                        'Table 11',
+                        'Table 12',
+                        'Balcony 1',
+                        'Balcony 2',
+                        'Garden Patio',
+                        'Bar Counter',
+                      ].map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
               )}
@@ -1491,22 +1520,41 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                 </button>
               </div>
 
-              {/* Complete Bill Action */}
-              <button
-                type="button"
-                onClick={handleCheckout}
-                disabled={!isOnline || checkingOut || cart.length === 0 || !currentCustomer}
-                className="w-full min-h-[46px] bg-[#111111] hover:bg-[#262626] disabled:opacity-50 text-white font-bold py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>
-                  {!isOnline
-                    ? 'Offline Mode — Billing Disabled'
-                    : checkingOut
-                    ? 'Processing Checkout...'
-                    : 'Confirm & Complete Bill'}
-                </span>
-              </button>
+              {/* Complete Bill Action or Waiter Send to Kitchen */}
+              {currentUser.role === 'owner' || currentUser.permissions?.can_settle_bills ? (
+                <button
+                  type="button"
+                  onClick={handleCheckout}
+                  disabled={!isOnline || checkingOut || cart.length === 0 || !currentCustomer}
+                  className="w-full min-h-[46px] bg-[#111111] hover:bg-[#262626] disabled:opacity-50 text-white font-bold py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>
+                    {!isOnline
+                      ? 'Offline Mode — Billing Disabled'
+                      : checkingOut
+                      ? 'Processing Checkout...'
+                      : !currentCustomer
+                      ? 'Scan NFC Card or Select Customer'
+                      : `Confirm & Complete Bill (₹${finalAmount})`}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleSaveDraft();
+                    handleOpenKotModal();
+                  }}
+                  disabled={!isOnline || savingDraft || cart.length === 0}
+                  className="w-full min-h-[46px] bg-[#111111] hover:bg-[#262626] disabled:opacity-50 text-white font-bold py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
+                >
+                  <Utensils className="w-4 h-4" />
+                  <span>
+                    {savingDraft ? 'Saving Order...' : 'Send Order to Kitchen & Print KOT'}
+                  </span>
+                </button>
+              )}
             </div>
           </div>
         </div>

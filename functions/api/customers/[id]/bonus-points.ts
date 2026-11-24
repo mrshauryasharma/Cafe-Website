@@ -6,6 +6,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const auth = await authenticate(request, env);
   if (auth instanceof Response) return auth;
 
+  if (auth.user.role !== 'owner' && !auth.user.permissions.can_award_bonus_points) {
+    return new Response(JSON.stringify({ error: 'Forbidden: Insufficient permissions to award or adjust bonus points' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   const id = params.id as string;
   if (!id) {
     return new Response(JSON.stringify({ error: 'Missing customer id' }), {

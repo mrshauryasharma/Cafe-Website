@@ -1,12 +1,15 @@
-import { Env } from '../../../types';
+import { Env, UserRole, UserPermissions } from '../../../types';
 import { requireOwner } from '../../../utils/auth';
 import { hashPassword } from '../../../utils/crypto';
+import { resolveUserPermissions } from '../../../utils/permissions';
 
 export interface UserSummary {
   id: string;
   name: string;
   username: string;
-  role: 'owner' | 'staff';
+  role: UserRole;
+  permissions_json?: string;
+  permissions: UserPermissions;
   is_active: number;
   created_at: string;
 }
@@ -17,11 +20,24 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   if (auth instanceof Response) return auth;
 
   try {
-    const users = await env.DB.prepare(
-      'SELECT id, name, username, role, is_active, created_at FROM users ORDER BY role ASC, created_at ASC'
-    ).all<UserSummary>();
+    const usersResult = await env.DB.prepare(
+      'SELECT id, name, username, role, permissions_json, is_active, created_at FROM users ORDER BY role ASC, created_at ASC'
+    ).all<{
+      id: string;
+      name: string;
+      username: string;
+      role: UserRole;
+      permissions_json?: string;
+      is_active: number;
+      created_at: string;
+    }>();
 
-    return new Response(JSON.stringify(users.results || []), {
+    const users: UserSummary[] = (usersResult.results || []).map((u) => ({
+      ...u,
+      permissions: resolveUserPermissions(u.role, u.permissions_json),
+    }));
+
+    return new Response(JSON.stringify(users), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -43,11 +59,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       name?: string;
       username?: string;
       password?: string;
+      role?: UserRole;
+      permissions?: Partial<UserPermissions>;
+      permissions_json?: string;
     };
 
     const name = body.name?.trim();
     const username = body.username?.trim().toLowerCase();
     const password = body.password;
+    const requestedRole: UserRole =
+      body.role === 'manager' || body.role === 'waiter' || body.role === 'staff' ? body.role : 'staff';
 
     if (!name || !username || !password) {
       return new Response(
@@ -76,15 +97,36 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const passwordHash = await hashPassword(password);
     const now = new Date().toISOString();
 
+    const permissionsJson = body.permissions
+      ? JSON.stringify(body.permissions)
+      : body.permissions_json || '{}';
+
     await env.DB.prepare(
-      'INSERT INTO users (id, name, username, password_hash, role, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(id, name, username, passwordHash, 'staff', 1, now).run();
+      'INSERT INTO users (id, name, username, password_hash, role, permissions_json, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(id, name, username, passwordHash, requestedRole, permissionsJson, 1, now).run();
 
     const created = await env.DB.prepare(
-      'SELECT id, name, username, role, is_active, created_at FROM users WHERE id = ?'
-    ).bind(id).first<UserSummary>();
+      'SELECT id, name, username, role, permissions_json, is_active, created_at FROM users WHERE id = ?'
+    ).bind(id).first<{
+      id: string;
+      name: string;
+      username: string;
+      role: UserRole;
+      permissions_json?: string;
+      is_active: number;
+      created_at: string;
+    }>();
 
-    return new Response(JSON.stringify(created), {
+    if (!created) {
+      throw new Error('User creation verification failed');
+    }
+
+    const userSummary: UserSummary = {
+      ...created,
+      permissions: resolveUserPermissions(created.role, created.permissions_json),
+    };
+
+    return new Response(JSON.stringify(userSummary), {
       status: 201,
       headers: { 'Content-Type': 'application/json' },
     });

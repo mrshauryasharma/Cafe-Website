@@ -1,5 +1,6 @@
-import { Env, UserSession } from '../../types';
+import { Env, UserSession, UserRole } from '../../types';
 import { verifyPassword, createJwt, createAuthCookie, DEFAULT_JWT_SECRET } from '../../utils/crypto';
+import { resolveUserPermissions } from '../../utils/permissions';
 
 interface LoginPayload {
   username?: string;
@@ -21,13 +22,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     const user = await env.DB.prepare(
-      'SELECT id, name, username, password_hash, role, is_active FROM users WHERE username = ?'
+      'SELECT id, name, username, password_hash, role, permissions_json, is_active FROM users WHERE username = ?'
     ).bind(username).first<{
       id: string;
       name: string;
       username: string;
       password_hash: string;
-      role: 'owner' | 'staff';
+      role: UserRole;
+      permissions_json?: string;
       is_active: number;
     }>();
 
@@ -46,6 +48,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       );
     }
 
+    const permissions = resolveUserPermissions(user.role, user.permissions_json);
+
     // Fetch cafe name
     let cafeName = 'Kimmo’s Kitchen';
     try {
@@ -62,6 +66,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       name: user.name,
       username: user.username,
       role: user.role,
+      permissions,
       exp: 0,
     };
 
@@ -76,6 +81,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           name: user.name,
           username: user.username,
           role: user.role,
+          permissions,
         },
         cafe_name: cafeName,
       }),

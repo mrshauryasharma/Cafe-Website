@@ -1,10 +1,10 @@
 import { Env } from '../../../types';
-import { requireOwner } from '../../../utils/auth';
+import { requirePermission } from '../../../utils/auth';
 import { MenuItem } from './index';
 
 export const onRequestPut: PagesFunction<Env> = async (context) => {
   const { request, env, params } = context;
-  const auth = await requireOwner(request, env);
+  const auth = await requirePermission(request, env, 'can_manage_menu_stock');
   if (auth instanceof Response) return auth;
 
   const id = params.id as string;
@@ -95,7 +95,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
 
 export const onRequestDelete: PagesFunction<Env> = async (context) => {
   const { request, env, params } = context;
-  const auth = await requireOwner(request, env);
+  const auth = await requirePermission(request, env, 'can_manage_menu_stock');
   if (auth instanceof Response) return auth;
 
   const id = params.id as string;

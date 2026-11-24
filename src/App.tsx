@@ -4,20 +4,20 @@ import { SetupGate } from './components/SetupGate';
 import { LoginScreen } from './components/LoginScreen';
 import { UnauthorizedScanScreen } from './components/UnauthorizedScanScreen';
 import { AppShell } from './components/AppShell';
+import { RouterProvider, useRouter } from './utils/router';
 import { Coffee } from 'lucide-react';
 
-export const App: React.FC = () => {
+const AppContent: React.FC = () => {
+  const { path, navigate } = useRouter();
   const [loading, setLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState<boolean | null>(null);
   const [cafeName, setCafeName] = useState<string>('Kimmo’s Kitchen');
   const [user, setUser] = useState<User | null>(null);
+  const [overrideShowLogin, setOverrideShowLogin] = useState(false);
 
   // Parse path for /scan/:card_uid
-  const pathname = window.location.pathname;
-  const isScanRoute = pathname.startsWith('/scan/');
-  const scanCardUid = isScanRoute ? pathname.replace('/scan/', '').trim() : '';
-
-  const [overrideShowLogin, setOverrideShowLogin] = useState(false);
+  const isScanRoute = path.startsWith('/scan/');
+  const scanCardUid = isScanRoute ? path.replace('/scan/', '').trim() : '';
 
   const checkStatusAndAuth = async () => {
     try {
@@ -40,6 +40,19 @@ export const App: React.FC = () => {
           if (authData.cafe_name) {
             setCafeName(authData.cafe_name);
           }
+
+          // Smart post-auth redirect if landing on root or login
+          if ((path === '/' || path === '/login') && authData.user) {
+            if (authData.user.role === 'waiter') {
+              navigate('/tables', true);
+            } else if (authData.user.role === 'staff') {
+              navigate('/pos', true);
+            } else if (authData.user.role === 'manager') {
+              navigate('/tables', true);
+            } else {
+              navigate('/owner/reports', true);
+            }
+          }
         } else {
           setUser(null);
         }
@@ -56,8 +69,26 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    document.title = `${cafeName} — NFC Loyalty & Counter POS`;
+    document.title = `${cafeName} — NFC Loyalty, POS & Floor Management`;
   }, [cafeName]);
+
+  const handleLoginSuccess = (loggedInUser: User, currentCafeName: string) => {
+    setUser(loggedInUser);
+    setCafeName(currentCafeName);
+
+    // Smart redirect based on role
+    if (isScanRoute && scanCardUid) {
+      navigate('/pos', true);
+    } else if (loggedInUser.role === 'waiter') {
+      navigate('/tables', true);
+    } else if (loggedInUser.role === 'staff') {
+      navigate('/pos', true);
+    } else if (loggedInUser.role === 'manager') {
+      navigate('/tables', true);
+    } else {
+      navigate('/owner/reports', true);
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -67,6 +98,7 @@ export const App: React.FC = () => {
     } finally {
       setUser(null);
       setOverrideShowLogin(true);
+      navigate('/login', true);
     }
   };
 
@@ -90,6 +122,7 @@ export const App: React.FC = () => {
           setIsInitialized(true);
           setUser(newUser);
           setCafeName(newCafeName);
+          navigate('/owner/reports', true);
         }}
         onRestoreComplete={() => {
           checkStatusAndAuth();
@@ -114,10 +147,7 @@ export const App: React.FC = () => {
     return (
       <LoginScreen
         cafeName={cafeName}
-        onLoginSuccess={(loggedInUser, currentCafeName) => {
-          setUser(loggedInUser);
-          setCafeName(currentCafeName);
-        }}
+        onLoginSuccess={handleLoginSuccess}
       />
     );
   }
@@ -131,6 +161,14 @@ export const App: React.FC = () => {
       onLogout={handleLogout}
       onCafeNameChange={(newName) => setCafeName(newName)}
     />
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <RouterProvider>
+      <AppContent />
+    </RouterProvider>
   );
 };
 

@@ -23,8 +23,23 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   username TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('owner', 'staff')),
+  role TEXT NOT NULL CHECK (role IN ('owner', 'manager', 'staff', 'waiter')),
+  permissions_json TEXT NOT NULL DEFAULT '{}',
   is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+
+-- 2.1 Dynamic Café Dining Tables
+CREATE TABLE IF NOT EXISTS cafe_tables (
+  id TEXT PRIMARY KEY,
+  table_number TEXT NOT NULL UNIQUE,
+  table_name TEXT NOT NULL,
+  section TEXT NOT NULL DEFAULT 'Main Floor',
+  capacity INTEGER NOT NULL DEFAULT 4,
+  status TEXT NOT NULL DEFAULT 'vacant' CHECK (status IN ('vacant', 'occupied')),
+  active_order_id TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 
@@ -151,3 +166,5 @@ CREATE INDEX IF NOT EXISTS idx_points_ledger_customer ON points_ledger(customer_
 CREATE INDEX IF NOT EXISTS idx_draft_orders_created ON draft_orders(created_at);
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_created_at ON inventory_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_item ON inventory_logs(menu_item_id);
+CREATE INDEX IF NOT EXISTS idx_cafe_tables_number ON cafe_tables(table_number);
+CREATE INDEX IF NOT EXISTS idx_cafe_tables_status ON cafe_tables(status);

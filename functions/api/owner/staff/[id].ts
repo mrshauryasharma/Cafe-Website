@@ -1,6 +1,7 @@
-import { Env } from '../../../types';
+import { Env, UserRole, UserPermissions } from '../../../types';
 import { requireOwner } from '../../../utils/auth';
 import { hashPassword } from '../../../utils/crypto';
+import { resolveUserPermissions } from '../../../utils/permissions';
 import { UserSummary } from './index';
 
 export const onRequestPut: PagesFunction<Env> = async (context) => {
@@ -18,8 +19,15 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
 
   try {
     const targetUser = await env.DB.prepare(
-      'SELECT id, name, username, role, is_active FROM users WHERE id = ?'
-    ).bind(id).first<UserSummary>();
+      'SELECT id, name, username, role, permissions_json, is_active FROM users WHERE id = ?'
+    ).bind(id).first<{
+      id: string;
+      name: string;
+      username: string;
+      role: UserRole;
+      permissions_json?: string;
+      is_active: number;
+    }>();
 
     if (!targetUser) {
       return new Response(JSON.stringify({ error: 'User not found' }), {
@@ -32,6 +40,9 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
       is_active?: number;
       new_password?: string;
       name?: string;
+      role?: UserRole;
+      permissions?: Partial<UserPermissions>;
+      permissions_json?: string;
     };
 
     // If changing is_active to 0 on an owner, check that at least one other active owner remains
@@ -61,20 +72,50 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
 
     const name = body.name?.trim() || null;
     const isActive = body.is_active !== undefined ? (body.is_active ? 1 : 0) : null;
+    const newRole =
+      body.role && ['owner', 'manager', 'staff', 'waiter'].includes(body.role)
+        ? body.role
+        : null;
+
+    let permissionsJson: string | null = null;
+    if (body.permissions) {
+      permissionsJson = JSON.stringify(body.permissions);
+    } else if (body.permissions_json !== undefined) {
+      permissionsJson = body.permissions_json;
+    }
 
     await env.DB.prepare(
       `UPDATE users
        SET is_active = COALESCE(?, is_active),
            password_hash = COALESCE(?, password_hash),
-           name = COALESCE(?, name)
+           name = COALESCE(?, name),
+           role = COALESCE(?, role),
+           permissions_json = COALESCE(?, permissions_json)
        WHERE id = ?`
-    ).bind(isActive, passwordHash, name, id).run();
+    ).bind(isActive, passwordHash, name, newRole, permissionsJson, id).run();
 
     const updated = await env.DB.prepare(
-      'SELECT id, name, username, role, is_active, created_at FROM users WHERE id = ?'
-    ).bind(id).first<UserSummary>();
+      'SELECT id, name, username, role, permissions_json, is_active, created_at FROM users WHERE id = ?'
+    ).bind(id).first<{
+      id: string;
+      name: string;
+      username: string;
+      role: UserRole;
+      permissions_json?: string;
+      is_active: number;
+      created_at: string;
+    }>();
 
-    return new Response(JSON.stringify(updated), {
+    if (!updated) {
+      throw new Error('User not found after update');
+    }
+
+    const userSummary: UserSummary = {
+      ...updated,
+      permissions: resolveUserPermissions(updated.role, updated.permissions_json),
+    };
+
+    return new Response(JSON.stringify(userSummary), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

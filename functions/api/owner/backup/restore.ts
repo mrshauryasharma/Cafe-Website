@@ -15,6 +15,7 @@ interface BackupPayload {
     points_ledger?: any[];
     draft_orders?: any[];
     inventory_logs?: any[];
+    cafe_tables?: any[];
   };
 }
 
@@ -53,6 +54,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     statements.push(env.DB.prepare('DELETE FROM nfc_cards'));
     statements.push(env.DB.prepare('DELETE FROM customers'));
     statements.push(env.DB.prepare('DELETE FROM menu_items'));
+    statements.push(env.DB.prepare('DELETE FROM cafe_tables'));
     statements.push(env.DB.prepare('DELETE FROM users'));
     statements.push(env.DB.prepare('DELETE FROM cafe_settings'));
 
@@ -95,18 +97,42 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     for (const u of users) {
       statements.push(
         env.DB.prepare(
-          `INSERT INTO users (id, name, username, password_hash, role, is_active, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO users (id, name, username, password_hash, role, permissions_json, is_active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           u.id || crypto.randomUUID(),
           u.name,
           u.username,
           u.password_hash,
           u.role,
+          u.permissions_json || '{}',
           u.is_active ?? 1,
           u.created_at || new Date().toISOString()
         )
       );
+    }
+
+    // 2.2.1 cafe_tables
+    if (data.cafe_tables && data.cafe_tables.length > 0) {
+      for (const t of data.cafe_tables) {
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO cafe_tables (id, table_number, table_name, section, capacity, status, active_order_id, is_active, sort_order, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            t.id || crypto.randomUUID(),
+            t.table_number,
+            t.table_name || t.table_number,
+            t.section || 'Main Floor',
+            t.capacity ?? 4,
+            t.status || 'vacant',
+            t.active_order_id ?? null,
+            t.is_active ?? 1,
+            t.sort_order ?? 0,
+            t.created_at || new Date().toISOString()
+          )
+        );
+      }
     }
 
     // 2.3 menu_items
