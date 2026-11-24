@@ -12,6 +12,12 @@ export interface CheckoutLineItem {
   notes?: string;
 }
 
+export interface SplitDetails {
+  cash?: number;
+  upi?: number;
+  card?: number;
+}
+
 export interface CheckoutPayload {
   customer_id: string;
   items: CheckoutLineItem[];
@@ -19,9 +25,15 @@ export interface CheckoutPayload {
   custom_redeem_points?: number;
   idempotency_key: string;
   dining_type?: string;
+  table_id?: string;
   table_number?: string;
   extra_discount?: number;
+  packaging_amount?: number;
+  tax_amount?: number;
   payment_method?: string;
+  split_details?: SplitDetails;
+  waiter_id?: string;
+  waiter_name?: string;
   draft_id?: string;
 }
 
@@ -35,6 +47,12 @@ export interface CheckoutReceipt {
   extra_discount: number;
   points_redeemed: number;
   discount_amount: number;
+  tax_amount: number;
+  cgst_amount: number;
+  sgst_amount: number;
+  gst_rate: number;
+  gstin: string | null;
+  packaging_amount: number;
   final_amount: number;
   points_earned: number;
   previous_balance: number;
@@ -42,6 +60,8 @@ export interface CheckoutReceipt {
   dining_type: string;
   table_number: string | null;
   payment_method: string;
+  split_details?: SplitDetails | null;
+  waiter_name?: string | null;
   items: CheckoutLineItem[];
   created_at: string;
   sms: SmsResult;
@@ -69,9 +89,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       custom_redeem_points,
       idempotency_key,
       dining_type,
+      table_id,
       table_number,
       extra_discount,
+      packaging_amount,
+      tax_amount,
       payment_method,
+      split_details,
       draft_id,
     } = body;
 
@@ -186,6 +210,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       min_bill_for_redeem: 0,
       max_redeem_percent: 100,
       staff_max_bonus_points: 50,
+      gst_enabled: 0,
+      gst_rate: 5.0,
+      gstin: null,
+      packaging_charge: 0.0,
       sms_enabled: 0,
       sms_api_key: null,
       sms_sender_id: null,
@@ -240,7 +268,27 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     const totalDiscount = Math.round((extraDiscount + pointsDiscount) * 100) / 100;
-    const finalAmount = Math.max(0, Math.round((subtotalAfterExtra - pointsDiscount) * 100) / 100);
+    const discountedSubtotal = Math.max(0, subtotalAfterExtra - pointsDiscount);
+
+    // Packaging Charge
+    const packagingAmount = Math.max(0, Number(packaging_amount ?? 0));
+
+    // Optional GST Calculation
+    let finalTaxAmount = 0;
+    let cgstAmount = 0;
+    let sgstAmount = 0;
+
+    if (safeSettings.gst_enabled && safeSettings.gst_rate > 0) {
+      finalTaxAmount = Math.round((discountedSubtotal * (safeSettings.gst_rate / 100)) * 100) / 100;
+      cgstAmount = Math.round((finalTaxAmount / 2) * 100) / 100;
+      sgstAmount = Math.round((finalTaxAmount - cgstAmount) * 100) / 100;
+    } else if (tax_amount && tax_amount > 0) {
+      finalTaxAmount = Math.round(Number(tax_amount) * 100) / 100;
+      cgstAmount = Math.round((finalTaxAmount / 2) * 100) / 100;
+      sgstAmount = Math.round((finalTaxAmount - cgstAmount) * 100) / 100;
+    }
+
+    const finalAmount = Math.max(0, Math.round((discountedSubtotal + packagingAmount + finalTaxAmount) * 100) / 100);
     const pointsEarned =
       safeSettings.earn_spend_unit > 0
         ? Math.floor((finalAmount / safeSettings.earn_spend_unit) * safeSettings.earn_points_per_unit)
@@ -249,19 +297,38 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const previousBalance = customer.points_balance;
     const newBalance = Math.round((previousBalance - pointsRedeemed + pointsEarned) * 100) / 100;
 
+    // Split Payment Validation
+    let splitDetailsJson: string | null = null;
+    if (paymentMethod && paymentMethod.toLowerCase() === 'split') {
+      const cash = Number(split_details?.cash || 0);
+      const upi = Number(split_details?.upi || 0);
+      const card = Number(split_details?.card || 0);
+      const splitSum = Math.round((cash + upi + card) * 100) / 100;
+
+      if (Math.abs(splitSum - finalAmount) > 0.05) {
+        return new Response(
+          JSON.stringify({
+            error: `Split payment total (₹${splitSum}) does not match final bill amount (₹${finalAmount})`,
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      splitDetailsJson = JSON.stringify({ cash, upi, card });
+    }
+
     // 5. Generate IDs & Waiter attribution
     const orderId = crypto.randomUUID();
     const orderNumber = `ORD-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`;
     const now = new Date().toISOString();
     const staffAttribution = `${auth.user.name} (${auth.user.role})`;
 
-    let waiterId: string | null = null;
-    let waiterName: string | null = null;
-    if (draft_id) {
+    let waiterId: string | null = body.waiter_id || null;
+    let waiterName: string | null = body.waiter_name || null;
+    if (draft_id && (!waiterId || !waiterName)) {
       const draftRecord = await env.DB.prepare('SELECT waiter_id, waiter_name FROM draft_orders WHERE id = ?').bind(draft_id).first<{ waiter_id?: string; waiter_name?: string }>();
       if (draftRecord) {
-        waiterId = draftRecord.waiter_id || null;
-        waiterName = draftRecord.waiter_name || null;
+        waiterId = draftRecord.waiter_id || waiterId;
+        waiterName = draftRecord.waiter_name || waiterName;
       }
     }
 
@@ -271,8 +338,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // A. Insert Order
     statements.push(
       env.DB.prepare(
-        `INSERT INTO orders (id, order_number, customer_id, staff_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, idempotency_key, dining_type, table_number, extra_discount, payment_method, waiter_id, waiter_name, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO orders (id, order_number, customer_id, staff_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, idempotency_key, dining_type, table_number, extra_discount, tax_amount, packaging_amount, payment_method, split_details_json, waiter_id, waiter_name, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         orderId,
         orderNumber,
@@ -287,7 +354,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         diningType,
         tableNumber,
         extraDiscount,
+        finalTaxAmount,
+        packagingAmount,
         paymentMethod,
+        splitDetailsJson,
         waiterId,
         waiterName,
         now
@@ -400,7 +470,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     // If checking out a table, mark table vacant
-    if (table_number) {
+    if (table_id) {
+      statements.push(
+        env.DB.prepare(
+          "UPDATE cafe_tables SET status = 'vacant', active_order_id = NULL WHERE id = ? OR active_order_id = ?"
+        ).bind(table_id, draftId || table_id)
+      );
+    } else if (table_number) {
       statements.push(
         env.DB.prepare(
           "UPDATE cafe_tables SET status = 'vacant', active_order_id = NULL WHERE table_number = ? OR table_name = ?"
@@ -430,6 +506,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       extra_discount: extraDiscount,
       points_redeemed: pointsRedeemed,
       discount_amount: totalDiscount,
+      tax_amount: finalTaxAmount,
+      cgst_amount: cgstAmount,
+      sgst_amount: sgstAmount,
+      gst_rate: safeSettings.gst_enabled ? safeSettings.gst_rate : 0,
+      gstin: safeSettings.gstin || null,
+      packaging_amount: packagingAmount,
       final_amount: finalAmount,
       points_earned: pointsEarned,
       previous_balance: previousBalance,
@@ -437,6 +519,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       dining_type: diningType,
       table_number: tableNumber,
       payment_method: paymentMethod,
+      split_details: split_details || (splitDetailsJson ? JSON.parse(splitDetailsJson) : null),
+      waiter_name: waiterName,
       items: validatedItems,
       created_at: now,
       sms: smsResult,

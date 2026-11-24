@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS cafe_settings (
   sms_api_key TEXT,
   sms_sender_id TEXT,
   sms_template TEXT,
+  gst_enabled INTEGER NOT NULL DEFAULT 0,
+  gst_rate REAL NOT NULL DEFAULT 5.0,
+  gstin TEXT,
+  packaging_charge REAL NOT NULL DEFAULT 0,
   last_backup_at TEXT
 );
 
@@ -98,7 +102,10 @@ CREATE TABLE IF NOT EXISTS orders (
   dining_type TEXT NOT NULL DEFAULT 'Dine-In',
   table_number TEXT,
   extra_discount REAL NOT NULL DEFAULT 0,
+  tax_amount REAL NOT NULL DEFAULT 0,
+  packaging_amount REAL NOT NULL DEFAULT 0,
   payment_method TEXT NOT NULL DEFAULT 'Cash/UPI',
+  split_details_json TEXT,
   waiter_id TEXT,
   waiter_name TEXT,
   created_at TEXT NOT NULL,

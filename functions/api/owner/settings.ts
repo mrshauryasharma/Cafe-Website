@@ -14,6 +14,10 @@ export interface CafeSettingsRow {
   sms_api_key: string | null;
   sms_sender_id: string | null;
   sms_template: string | null;
+  gst_enabled: number;
+  gst_rate: number;
+  gstin: string | null;
+  packaging_charge: number;
   last_backup_at: string | null;
 }
 
@@ -62,6 +66,10 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
     const smsApiKey = body.sms_api_key?.trim() || null;
     const smsSenderId = body.sms_sender_id?.trim() || null;
     const smsTemplate = body.sms_template?.trim() || null;
+    const gstEnabled = body.gst_enabled ? 1 : 0;
+    const gstRate = Math.max(0, Number(body.gst_rate ?? 5.0));
+    const gstin = body.gstin?.trim() || null;
+    const packagingCharge = Math.max(0, Number(body.packaging_charge ?? 0));
 
     // Strict validation bounds
     if (earnPointsPerUnit < 0) {
@@ -113,7 +121,11 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
            sms_enabled = ?,
            sms_api_key = ?,
            sms_sender_id = ?,
-           sms_template = ?
+           sms_template = ?,
+           gst_enabled = ?,
+           gst_rate = ?,
+           gstin = ?,
+           packaging_charge = ?
        WHERE id = 1`
     ).bind(
       cafeName,
@@ -126,7 +138,11 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
       smsEnabled,
       smsApiKey,
       smsSenderId,
-      smsTemplate
+      smsTemplate,
+      gstEnabled,
+      gstRate,
+      gstin,
+      packagingCharge
     ).run();
 
     const updated = await env.DB.prepare('SELECT * FROM cafe_settings WHERE id = 1').first<CafeSettingsRow>();

@@ -61,8 +61,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       for (const row of data.cafe_settings) {
         statements.push(
           env.DB.prepare(
-            `INSERT OR REPLACE INTO cafe_settings (id, cafe_name, earn_points_per_unit, earn_spend_unit, point_redeem_value, min_bill_for_redeem, max_redeem_percent, staff_max_bonus_points, sms_enabled, sms_api_key, sms_sender_id, sms_template, last_backup_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            `INSERT OR REPLACE INTO cafe_settings (id, cafe_name, earn_points_per_unit, earn_spend_unit, point_redeem_value, min_bill_for_redeem, max_redeem_percent, staff_max_bonus_points, sms_enabled, sms_api_key, sms_sender_id, sms_template, gst_enabled, gst_rate, gstin, packaging_charge, last_backup_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).bind(
             row.id || 1,
             row.cafe_name || 'Kimmo’s Kitchen',
@@ -76,6 +76,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             row.sms_api_key ?? null,
             row.sms_sender_id ?? null,
             row.sms_template ?? null,
+            row.gst_enabled ?? 0,
+            row.gst_rate ?? 5.0,
+            row.gstin ?? null,
+            row.packaging_charge ?? 0,
             row.last_backup_at ?? null
           )
         );
@@ -203,8 +207,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       for (const o of data.orders) {
         statements.push(
           env.DB.prepare(
-            `INSERT INTO orders (id, order_number, customer_id, staff_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, idempotency_key, dining_type, table_number, extra_discount, payment_method, waiter_id, waiter_name, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            `INSERT INTO orders (id, order_number, customer_id, staff_id, subtotal, points_redeemed, discount_amount, final_amount, points_earned, idempotency_key, dining_type, table_number, extra_discount, tax_amount, packaging_amount, payment_method, split_details_json, waiter_id, waiter_name, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).bind(
             o.id || crypto.randomUUID(),
             o.order_number,
@@ -219,7 +223,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             o.dining_type || 'Dine-In',
             o.table_number ?? null,
             o.extra_discount ?? 0,
+            o.tax_amount ?? 0,
+            o.packaging_amount ?? 0,
             o.payment_method || 'Cash/UPI',
+            o.split_details_json ?? null,
             o.waiter_id ?? null,
             o.waiter_name ?? null,
             o.created_at || new Date().toISOString()

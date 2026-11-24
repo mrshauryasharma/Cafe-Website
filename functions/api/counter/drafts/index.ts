@@ -10,12 +10,16 @@ export interface DraftOrderRow {
   customer_name?: string | null;
   customer_phone?: string | null;
   dining_type: string;
+  table_id?: string | null;
   table_number: string | null;
+  waiter_id?: string | null;
+  waiter_name?: string | null;
   items_json: string;
   items?: CheckoutLineItem[];
   notes: string | null;
   created_by: string;
   created_at: string;
+  updated_at?: string | null;
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {

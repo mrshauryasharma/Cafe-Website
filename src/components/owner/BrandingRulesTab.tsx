@@ -8,6 +8,7 @@ import {
   Gift,
   Coins,
   ShieldAlert,
+  Receipt,
 } from 'lucide-react';
 import { CafeSettingsRow } from '../../../functions/api/owner/settings';
 
@@ -371,6 +372,88 @@ export const BrandingRulesTab: React.FC<BrandingRulesTabProps> = ({ onCafeNameCh
             SMS notifications disabled. Toggle on to configure automatic post-checkout customer SMS.
           </p>
         )}
+      </div>
+
+      {/* 4. Tax (GST) & Packaging Charges */}
+      <div className="bg-white border border-[#E6E2DA] rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
+        <div className="flex items-center justify-between border-b border-[#E6E2DA] pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-[#F3EFEA] border border-[#E6E2DA] flex items-center justify-center">
+              <Receipt className="w-4 h-4 text-[#111111]" />
+            </div>
+            <div>
+              <h3 className="font-bold text-base text-[#111111] font-serif">Tax (GST) & Packaging Charges</h3>
+              <p className="text-xs text-[#52525B]">Configure optional GST on bills and default takeaway packaging</p>
+            </div>
+          </div>
+
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.gst_enabled === 1}
+              onChange={(e) => setSettings({ ...settings, gst_enabled: e.target.checked ? 1 : 0 })}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-[#E6E2DA] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#111111]"></div>
+          </label>
+        </div>
+
+        {settings.gst_enabled === 1 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+            <div>
+              <label className="block text-xs font-semibold text-[#52525B] uppercase tracking-wider mb-1.5">
+                Total GST Rate (%)
+              </label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="28"
+                value={settings.gst_rate ?? 5}
+                onChange={(e) => setSettings({ ...settings, gst_rate: Math.max(0, Number(e.target.value)) })}
+                placeholder="5"
+                className="w-full min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-4 py-2.5 text-[#111111] text-sm focus:outline-none focus:border-[#111111] focus:bg-white font-mono"
+              />
+              <p className="text-[11px] text-[#71717A] mt-1">
+                Split equally: {( (settings.gst_rate ?? 5) / 2 ).toFixed(1)}% CGST + {( (settings.gst_rate ?? 5) / 2 ).toFixed(1)}% SGST
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[#52525B] uppercase tracking-wider mb-1.5">
+                GSTIN / Tax ID (Optional)
+              </label>
+              <input
+                type="text"
+                value={settings.gstin || ''}
+                onChange={(e) => setSettings({ ...settings, gstin: e.target.value.toUpperCase() })}
+                placeholder="e.g. 07AAAAA0000A1Z5"
+                className="w-full min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-4 py-2.5 text-[#111111] text-sm focus:outline-none focus:border-[#111111] focus:bg-white font-mono uppercase"
+              />
+              <p className="text-[11px] text-[#71717A] mt-1">
+                Printed on customer 80mm thermal bill receipts
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-xs font-semibold text-[#52525B] uppercase tracking-wider mb-1.5">
+            Default Takeaway Packaging Charge (₹)
+          </label>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={settings.packaging_charge ?? 0}
+            onChange={(e) => setSettings({ ...settings, packaging_charge: Math.max(0, Number(e.target.value)) })}
+            placeholder="0"
+            className="w-full max-w-xs min-h-[44px] bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl px-4 py-2.5 text-[#111111] text-sm focus:outline-none focus:border-[#111111] focus:bg-white font-mono"
+          />
+          <p className="text-[11px] text-[#71717A] mt-1">
+            Auto-applied on POS when Takeaway / Delivery dining type is selected (cashier can adjust per bill)
+          </p>
+        </div>
       </div>
 
       <div className="flex justify-end pt-2">

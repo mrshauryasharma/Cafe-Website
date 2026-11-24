@@ -87,7 +87,11 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   const [tableNumber, setTableNumber] = useState(initialTableId || 'Table 1');
   const [availableTables, setAvailableTables] = useState<{ id: string; table_number: string; table_name: string; section: string }[]>([]);
   const [extraDiscount, setExtraDiscount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'upi' | 'card'>('cash');
+  const [packagingChargeInput, setPackagingChargeInput] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'upi' | 'card' | 'split'>('cash');
+  const [splitCash, setSplitCash] = useState('');
+  const [splitUpi, setSplitUpi] = useState('');
+  const [splitCard, setSplitCard] = useState('');
   const [redeemPointsToggle, setRedeemPointsToggle] = useState(false);
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [expandedNoteIndex, setExpandedNoteIndex] = useState<number | null>(null);
@@ -175,11 +179,36 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   }, []);
 
   useEffect(() => {
-    if (initialTableId) {
+    if (initialTableId && draftsList.length > 0) {
+      const matchingDraft = draftsList.find(
+        (d) =>
+          d.table_id === initialTableId ||
+          d.table_number?.toLowerCase() === initialTableId.toLowerCase()
+      );
+      if (matchingDraft && activeDraftId !== matchingDraft.id) {
+        handleResumeDraft(matchingDraft);
+      } else if (!matchingDraft && !activeDraftId) {
+        setTableNumber(initialTableId);
+        setDiningType('dine_in');
+      }
+    } else if (initialTableId) {
       setTableNumber(initialTableId);
       setDiningType('dine_in');
     }
-  }, [initialTableId]);
+  }, [initialTableId, draftsList]);
+
+  // Sync default packaging charge when dining mode is Takeaway or Delivery
+  useEffect(() => {
+    if (diningType === 'takeaway' || diningType === 'delivery') {
+      if (packagingChargeInput === '' && settings?.packaging_charge) {
+        setPackagingChargeInput(String(settings.packaging_charge));
+      }
+    } else {
+      if (packagingChargeInput !== '') {
+        setPackagingChargeInput('');
+      }
+    }
+  }, [diningType, settings?.packaging_charge]);
 
   // 2. Auto-scan if initialCardUid is provided
   useEffect(() => {
@@ -419,6 +448,11 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   const extraDiscountNum = Math.max(0, Number(extraDiscount) || 0);
   const subtotalAfterExtra = Math.max(0, subtotal - extraDiscountNum);
 
+  const packagingAmountNum =
+    diningType === 'takeaway' || diningType === 'delivery'
+      ? Math.max(0, Number(packagingChargeInput) || (settings?.packaging_charge ?? 0))
+      : 0;
+
   const pointRedeemValue = settings?.point_redeem_value ?? 1.0;
   const earnSpendUnit = settings?.earn_spend_unit ?? 100;
   const earnPointsPerUnit = settings?.earn_points_per_unit ?? 10;
@@ -438,11 +472,26 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   const pointsToRedeem = canRedeem ? Math.min(customerBalance, maxPointsPossible) : 0;
   const pointsDiscountAmount = Math.round(pointsToRedeem * pointRedeemValue * 100) / 100;
 
-  const finalAmount = Math.max(0, Math.round((subtotalAfterExtra - pointsDiscountAmount) * 100) / 100);
+  // Taxable base includes packaging and excludes points redemption discount
+  const taxableBase = Math.max(0, subtotalAfterExtra - pointsDiscountAmount + packagingAmountNum);
+  const gstRate = settings?.gst_enabled === 1 && (settings?.gst_rate ?? 0) > 0 ? (settings?.gst_rate ?? 0) : 0;
+  const totalTax = gstRate > 0 ? Math.round((taxableBase * (gstRate / 100)) * 100) / 100 : 0;
+  const cgstAmount = Math.round((totalTax / 2) * 100) / 100;
+  const sgstAmount = Math.round((totalTax - cgstAmount) * 100) / 100;
+
+  const finalAmount = Math.max(0, Math.round((taxableBase + totalTax) * 100) / 100);
   const pointsToEarn =
     earnSpendUnit > 0
       ? Math.floor((finalAmount / earnSpendUnit) * earnPointsPerUnit)
       : 0;
+
+  // Split payment validation
+  const splitCashNum = Math.max(0, Number(splitCash) || 0);
+  const splitUpiNum = Math.max(0, Number(splitUpi) || 0);
+  const splitCardNum = Math.max(0, Number(splitCard) || 0);
+  const splitSum = Math.round((splitCashNum + splitUpiNum + splitCardNum) * 100) / 100;
+  const splitRemaining = Math.max(0, Math.round((finalAmount - splitSum) * 100) / 100);
+  const isSplitValid = paymentMethod !== 'split' || Math.abs(splitSum - finalAmount) <= 0.05;
 
   // Save Draft (Hold Table Order)
   const handleSaveDraft = async () => {
@@ -562,11 +611,21 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
       alert('Cart is empty.');
       return;
     }
+    if (paymentMethod === 'split' && !isSplitValid) {
+      alert(
+        `Split payment total (₹${splitSum}) does not match Net Payable (₹${finalAmount}). Remaining to allocate: ₹${splitRemaining}`
+      );
+      return;
+    }
 
     setCheckingOut(true);
     setError(null);
 
     const idempotencyKey = `idemp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    const matchingTableObj = availableTables.find(
+      (t) => t.table_number === tableNumber || t.id === tableNumber
+    );
 
     try {
       const res = await fetch('/api/counter/checkout', {
@@ -580,8 +639,19 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
           idempotency_key: idempotencyKey,
           dining_type: diningType,
           table_number: diningType === 'dine_in' ? tableNumber : undefined,
+          table_id: diningType === 'dine_in' && matchingTableObj ? matchingTableObj.id : undefined,
           extra_discount: extraDiscountNum,
+          packaging_amount: packagingAmountNum,
+          tax_amount: totalTax,
           payment_method: paymentMethod,
+          split_details:
+            paymentMethod === 'split'
+              ? {
+                  cash: splitCashNum,
+                  upi: splitUpiNum,
+                  card: splitCardNum,
+                }
+              : undefined,
           draft_id: activeDraftId || undefined,
         }),
       });
@@ -618,11 +688,15 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     setReceipt(null);
     setCart([]);
     setExtraDiscount('');
+    setPackagingChargeInput('');
     setRedeemPointsToggle(false);
     setScanResult(null);
     setScannedCardUid('');
     setActiveDraftId(null);
     setPaymentMethod('cash');
+    setSplitCash('');
+    setSplitUpi('');
+    setSplitCard('');
   };
 
   // Bonus points grant from CRM strip
@@ -901,6 +975,87 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
               <RefreshCw className="w-4 h-4" />
               <span>Link / Replace for Existing</span>
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* SMART NFC RUNNING-TABLE AUTO-MATCH BANNER */}
+      {scanResult?.active_table && activeDraftId !== scanResult.active_table.draft_id && (
+        <div className="bg-[#ECFDF5] border border-[#BBF7D0] rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[#166534]">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-[#D1FAE5] rounded-xl flex items-center justify-center text-[#166534] flex-shrink-0">
+              <Utensils className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-bold text-sm text-[#166534]">
+                Active Running Table: {scanResult.active_table.table_name} ({scanResult.active_table.table_number})
+              </p>
+              <p className="text-xs text-[#166534]/80 mt-0.5">
+                {scanResult.customer?.name} has a running order with {scanResult.active_table.item_count} items (₹{scanResult.active_table.subtotal}).
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const matchedDraft = draftsList.find((d) => d.id === scanResult.active_table?.draft_id);
+              if (matchedDraft) {
+                handleResumeDraft(matchedDraft);
+              } else {
+                fetchDrafts().then(() => {
+                  const retryDraft = draftsList.find((d) => d.id === scanResult.active_table?.draft_id);
+                  if (retryDraft) handleResumeDraft(retryDraft);
+                });
+              }
+            }}
+            className="min-h-[38px] px-4 py-2 bg-[#166534] hover:bg-[#14532D] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer shadow-xs self-end sm:self-auto"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span>Load Table &amp; Settle Bill</span>
+          </button>
+        </div>
+      )}
+
+      {/* OCCUPIED TABLES QUICK BAR */}
+      {draftsList.some(
+        (d) => d.table_number && d.table_number !== 'Takeaway' && d.table_number !== 'Delivery'
+      ) && (
+        <div className="bg-white border border-[#E6E2DA] rounded-2xl p-3 shadow-2xs flex items-center gap-2 overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-[#52525B] font-serif uppercase tracking-wider whitespace-nowrap pl-1">
+            <Utensils className="w-3.5 h-3.5 text-[#111111]" />
+            <span>Occupied Tables:</span>
+          </div>
+          <div className="flex items-center gap-2 flex-nowrap">
+            {draftsList
+              .filter(
+                (d) => d.table_number && d.table_number !== 'Takeaway' && d.table_number !== 'Delivery'
+              )
+              .map((d) => {
+                const isCurrent = activeDraftId === d.id;
+                const draftSubtotal =
+                  d.items?.reduce((sum, it) => sum + it.quantity * it.unit_price, 0) || 0;
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => handleResumeDraft(d)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                      isCurrent
+                        ? 'bg-[#111111] text-white shadow-xs'
+                        : 'bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] border border-[#E6E2DA]'
+                    }`}
+                  >
+                    <span className="font-serif">{d.table_number}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full tabular-nums font-mono ${
+                        isCurrent ? 'bg-white/20 text-white' : 'bg-[#E6E2DA] text-[#52525B]'
+                      }`}
+                    >
+                      {d.items?.length || 0} items &bull; ₹{draftSubtotal}
+                    </span>
+                  </button>
+                );
+              })}
           </div>
         </div>
       )}
@@ -1407,6 +1562,27 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                 </div>
               </div>
 
+              {/* Takeaway / Delivery Packaging Charge */}
+              {(diningType === 'takeaway' || diningType === 'delivery') && (
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[#52525B] flex items-center gap-1">
+                    <ShoppingBag className="w-3.5 h-3.5 text-[#52525B]" />
+                    <span>Packaging Charge:</span>
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[#71717A] font-mono">₹</span>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="0"
+                      value={packagingChargeInput}
+                      onChange={(e) => setPackagingChargeInput(e.target.value)}
+                      className="w-16 bg-white border border-[#E6E2DA] rounded-lg px-2 py-0.5 text-xs text-right font-mono tabular-nums focus:outline-none focus:border-[#111111]"
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Loyalty Points Redemption Toggle */}
               <div className="flex items-center justify-between pt-2 border-t border-[#E6E2DA]">
                 <div>
@@ -1437,18 +1613,32 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                 </div>
               )}
 
+              {/* Optional GST Calculation Breakdown */}
+              {settings?.gst_enabled === 1 && (settings?.gst_rate ?? 0) > 0 && (
+                <div className="space-y-1 pt-2 border-t border-[#E6E2DA] text-[#52525B]">
+                  <div className="flex justify-between font-semibold text-[#111111]">
+                    <span>GST ({settings.gst_rate}%):</span>
+                    <span className="font-mono tabular-nums">₹{totalTax}</span>
+                  </div>
+                  <div className="flex justify-between text-[10px] text-[#71717A] pl-2 font-mono tabular-nums">
+                    <span>CGST ({(settings.gst_rate / 2).toFixed(1)}%): ₹{cgstAmount}</span>
+                    <span>SGST ({(settings.gst_rate / 2).toFixed(1)}%): ₹{sgstAmount}</span>
+                  </div>
+                </div>
+              )}
+
               {/* Payment Method Selector */}
               <div className="pt-2 border-t border-[#E6E2DA] space-y-1">
                 <span className="text-[11px] font-bold text-[#52525B] uppercase tracking-wider">
                   Payment Method
                 </span>
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className="grid grid-cols-4 gap-1.5">
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('cash')}
                     className={`py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       paymentMethod === 'cash'
-                        ? 'bg-[#111111] text-white'
+                        ? 'bg-[#111111] text-white shadow-xs'
                         : 'bg-white text-[#52525B] hover:text-[#111111] border border-[#E6E2DA]'
                     }`}
                   >
@@ -1459,7 +1649,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                     onClick={() => setPaymentMethod('upi')}
                     className={`py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       paymentMethod === 'upi'
-                        ? 'bg-[#111111] text-white'
+                        ? 'bg-[#111111] text-white shadow-xs'
                         : 'bg-white text-[#52525B] hover:text-[#111111] border border-[#E6E2DA]'
                     }`}
                   >
@@ -1470,13 +1660,133 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                     onClick={() => setPaymentMethod('card')}
                     className={`py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       paymentMethod === 'card'
-                        ? 'bg-[#111111] text-white'
+                        ? 'bg-[#111111] text-white shadow-xs'
                         : 'bg-white text-[#52525B] hover:text-[#111111] border border-[#E6E2DA]'
                     }`}
                   >
                     Card
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('split')}
+                    className={`py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      paymentMethod === 'split'
+                        ? 'bg-[#111111] text-white shadow-xs'
+                        : 'bg-white text-[#52525B] hover:text-[#111111] border border-[#E6E2DA]'
+                    }`}
+                  >
+                    Split
+                  </button>
                 </div>
+
+                {/* Split Payment Controls */}
+                {paymentMethod === 'split' && (
+                  <div className="p-2.5 bg-white border border-[#E6E2DA] rounded-xl space-y-2 mt-2">
+                    <div className="flex items-center justify-between text-[11px] font-bold">
+                      <span className="text-[#52525B]">Split Amounts:</span>
+                      <span
+                        className={`font-mono tabular-nums ${
+                          isSplitValid ? 'text-[#166534]' : 'text-[#991B1B]'
+                        }`}
+                      >
+                        Total: ₹{splitSum} / ₹{finalAmount}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                      {/* Cash Split */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[10px] text-[#52525B]">
+                          <span>Cash (₹)</span>
+                          {splitRemaining > 0 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSplitCash(
+                                  String(Math.round((splitCashNum + splitRemaining) * 100) / 100)
+                                )
+                              }
+                              className="text-[#166534] font-bold underline cursor-pointer hover:text-[#14532D]"
+                            >
+                              Fill Rem.
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={splitCash}
+                          onChange={(e) => setSplitCash(e.target.value)}
+                          className="w-full bg-[#FAF9F6] border border-[#E6E2DA] rounded-lg px-2 py-1 text-xs font-mono tabular-nums text-[#111111] focus:outline-none focus:border-[#111111]"
+                        />
+                      </div>
+
+                      {/* UPI Split */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[10px] text-[#52525B]">
+                          <span>UPI / QR (₹)</span>
+                          {splitRemaining > 0 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSplitUpi(
+                                  String(Math.round((splitUpiNum + splitRemaining) * 100) / 100)
+                                )
+                              }
+                              className="text-[#166534] font-bold underline cursor-pointer hover:text-[#14532D]"
+                            >
+                              Fill Rem.
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={splitUpi}
+                          onChange={(e) => setSplitUpi(e.target.value)}
+                          className="w-full bg-[#FAF9F6] border border-[#E6E2DA] rounded-lg px-2 py-1 text-xs font-mono tabular-nums text-[#111111] focus:outline-none focus:border-[#111111]"
+                        />
+                      </div>
+
+                      {/* Card Split */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[10px] text-[#52525B]">
+                          <span>Card (₹)</span>
+                          {splitRemaining > 0 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSplitCard(
+                                  String(Math.round((splitCardNum + splitRemaining) * 100) / 100)
+                                )
+                              }
+                              className="text-[#166534] font-bold underline cursor-pointer hover:text-[#14532D]"
+                            >
+                              Fill Rem.
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={splitCard}
+                          onChange={(e) => setSplitCard(e.target.value)}
+                          className="w-full bg-[#FAF9F6] border border-[#E6E2DA] rounded-lg px-2 py-1 text-xs font-mono tabular-nums text-[#111111] focus:outline-none focus:border-[#111111]"
+                        />
+                      </div>
+                    </div>
+
+                    {!isSplitValid && (
+                      <p className="text-[10px] text-[#991B1B] font-semibold">
+                        Allocated ₹{splitSum} of ₹{finalAmount}. Difference: ₹
+                        {Math.abs(Math.round((finalAmount - splitSum) * 100) / 100)}.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Grand Total */}
@@ -1778,6 +2088,9 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                   {settings?.cafe_name || 'Kimmo’s Kitchen'}
                 </h2>
                 <p className="text-[10px] text-[#52525B]">Tax Invoice / Customer Receipt</p>
+                {receipt.gstin && (
+                  <p className="text-[10px] text-[#52525B] font-mono mt-0.5">GSTIN: {receipt.gstin}</p>
+                )}
                 <p className="text-[10px] text-[#52525B] mt-0.5">Order #{receipt.order_number}</p>
                 <p className="text-[9px] text-[#71717A]">{receipt.created_at || new Date().toLocaleString()}</p>
               </div>
@@ -1799,9 +2112,20 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                   <span className="text-[#52525B]">Table:</span>{' '}
                   <strong>{receipt.table_number || 'N/A'}</strong>
                 </div>
-                <div>
+                {receipt.waiter_name && (
+                  <div>
+                    <span className="text-[#52525B]">Server:</span>{' '}
+                    <strong className="font-serif">{receipt.waiter_name}</strong>
+                  </div>
+                )}
+                <div className={receipt.payment_method === 'split' ? 'col-span-2' : ''}>
                   <span className="text-[#52525B]">Pay Mode:</span>{' '}
                   <strong className="uppercase">{receipt.payment_method}</strong>
+                  {receipt.payment_method === 'split' && receipt.split_details && (
+                    <span className="text-[10px] text-[#52525B] ml-1 font-mono">
+                      (Cash ₹{receipt.split_details.cash || 0}, UPI ₹{receipt.split_details.upi || 0}, Card ₹{receipt.split_details.card || 0})
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1842,6 +2166,24 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                   <div className="flex justify-between text-[#166534]">
                     <span>Points Redeemed ({receipt.points_redeemed} pts):</span>
                     <span className="font-mono tabular-nums">-₹{receipt.discount_amount}</span>
+                  </div>
+                )}
+                {receipt.packaging_amount > 0 && (
+                  <div className="flex justify-between text-[#52525B]">
+                    <span>Packaging Charge:</span>
+                    <span className="font-mono tabular-nums">₹{receipt.packaging_amount}</span>
+                  </div>
+                )}
+                {receipt.tax_amount > 0 && (
+                  <div className="space-y-0.5 pt-0.5 text-[#52525B]">
+                    <div className="flex justify-between">
+                      <span>GST ({receipt.gst_rate}%):</span>
+                      <span className="font-mono tabular-nums">₹{receipt.tax_amount}</span>
+                    </div>
+                    <div className="flex justify-between text-[10px] text-[#71717A] pl-2 font-mono tabular-nums">
+                      <span>CGST: ₹{receipt.cgst_amount}</span>
+                      <span>SGST: ₹{receipt.sgst_amount}</span>
+                    </div>
                   </div>
                 )}
                 <div className="flex justify-between font-bold text-sm text-[#111111] pt-1 border-t border-[#111111]">

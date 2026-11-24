@@ -4,10 +4,20 @@ import { MenuItem } from '../../owner/menu/index';
 import { CafeSettingsRow } from '../../owner/settings';
 import { OrderWithItems } from '../../customers/[id]';
 
+export interface ActiveTableMatch {
+  table_id: string;
+  table_number: string;
+  table_name: string;
+  draft_id: string;
+  item_count: number;
+  subtotal: number;
+}
+
 export interface CardScanResult {
   cardStatus: 'active' | 'unassigned' | 'blocked';
   card_uid: string;
   blocked_reason?: string | null;
+  active_table?: ActiveTableMatch | null;
   customer?: {
     id: string;
     name: string;
@@ -153,9 +163,37 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         ? Math.round((customer.total_spent / customer.total_visits) * 100) / 100
         : 0;
 
+    // Check if customer has an active running table / draft order
+    const activeDraft = await env.DB.prepare(
+      `SELECT d.id AS draft_id, d.draft_number, d.table_id, d.table_number, d.items_json, t.table_name
+       FROM draft_orders d
+       LEFT JOIN cafe_tables t ON (d.table_id = t.id OR d.table_number = t.table_number)
+       WHERE (d.customer_id = ? OR d.customer_phone = ?)
+       ORDER BY d.created_at DESC LIMIT 1`
+    ).bind(customer.id, customer.phone).first<any>();
+
+    let activeTableInfo = null;
+    if (activeDraft) {
+      let parsedItems: any[] = [];
+      try {
+        parsedItems = JSON.parse(activeDraft.items_json || '[]');
+      } catch {
+        parsedItems = [];
+      }
+      activeTableInfo = {
+        table_id: activeDraft.table_id || activeDraft.table_number,
+        table_number: activeDraft.table_number || 'Dine-In',
+        table_name: activeDraft.table_name || activeDraft.table_number || 'Table',
+        draft_id: activeDraft.draft_id,
+        item_count: parsedItems.length,
+        subtotal: parsedItems.reduce((sum: number, it: any) => sum + (Number(it.quantity) || 1) * (Number(it.unit_price) || 0), 0),
+      };
+    }
+
     const payload: CardScanResult = {
       cardStatus: 'active',
       card_uid: cleanUid,
+      active_table: activeTableInfo,
       customer: {
         id: customer.id,
         name: customer.name,

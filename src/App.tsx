@@ -72,6 +72,24 @@ const AppContent: React.FC = () => {
     document.title = `${cafeName} — NFC Loyalty, POS & Floor Management`;
   }, [cafeName]);
 
+  // Smart NFC scan auto-redirect for authenticated staff/manager/owner
+  useEffect(() => {
+    if (user && isScanRoute && scanCardUid) {
+      fetch(`/api/counter/scan/${encodeURIComponent(scanCardUid)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: any) => {
+          if (data?.active_table?.table_id) {
+            navigate(`/pos/${encodeURIComponent(data.active_table.table_id)}?card_uid=${encodeURIComponent(scanCardUid)}`, true);
+          } else {
+            navigate(`/pos?card_uid=${encodeURIComponent(scanCardUid)}`, true);
+          }
+        })
+        .catch(() => {
+          navigate(`/pos?card_uid=${encodeURIComponent(scanCardUid)}`, true);
+        });
+    }
+  }, [user, isScanRoute, scanCardUid, navigate]);
+
   const handleLoginSuccess = (loggedInUser: User, currentCafeName: string) => {
     setUser(loggedInUser);
     setCafeName(currentCafeName);
