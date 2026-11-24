@@ -279,28 +279,26 @@ async function migrateUsersSchemaIfNeeded(db: D1Database): Promise<void> {
         hasOldPermissions ? "COALESCE(permissions_json, '{}')" : "'{}'"
       } AS permissions_json, is_active, created_at`;
 
-      await db.batch([
-        db.prepare('PRAGMA foreign_keys=OFF'),
-        db.prepare(`
-          CREATE TABLE users_new (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK (role IN ('owner', 'manager', 'staff', 'waiter')),
-            permissions_json TEXT NOT NULL DEFAULT '{}',
-            is_active INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL
-          )
-        `),
-        db.prepare(`
-          INSERT INTO users_new (id, name, username, password_hash, role, permissions_json, is_active, created_at)
-          SELECT ${selectCols} FROM users
-        `),
-        db.prepare('DROP TABLE users'),
-        db.prepare('ALTER TABLE users_new RENAME TO users'),
-        db.prepare('PRAGMA foreign_keys=ON'),
-      ]);
+      await db.prepare('PRAGMA foreign_keys=OFF').run();
+      await db.prepare(`
+        CREATE TABLE IF NOT EXISTS users_new (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          username TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('owner', 'manager', 'staff', 'waiter')),
+          permissions_json TEXT NOT NULL DEFAULT '{}',
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL
+        )
+      `).run();
+      await db.prepare(`
+        INSERT INTO users_new (id, name, username, password_hash, role, permissions_json, is_active, created_at)
+        SELECT ${selectCols} FROM users
+      `).run();
+      await db.prepare('DROP TABLE users').run();
+      await db.prepare('ALTER TABLE users_new RENAME TO users').run();
+      await db.prepare('PRAGMA foreign_keys=ON').run();
       console.log('Users table migrated successfully.');
     }
   } catch (err) {
