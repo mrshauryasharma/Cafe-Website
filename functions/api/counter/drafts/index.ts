@@ -40,7 +40,20 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     const parsed = (drafts.results || []).map((d) => {
       let items: CheckoutLineItem[] = [];
       try {
-        items = JSON.parse(d.items_json);
+        const rawItems = JSON.parse(d.items_json);
+        if (Array.isArray(rawItems)) {
+          items = rawItems.map((it: any) => {
+            const resolvedName = (it.item_name || it.name || 'Menu Item').trim();
+            return {
+              menu_item_id: it.menu_item_id || undefined,
+              item_name: resolvedName,
+              name: resolvedName,
+              quantity: Math.max(1, Number(it.quantity) || 1),
+              unit_price: Math.max(0, Number(it.unit_price ?? it.price) || 0),
+              notes: it.notes || undefined,
+            };
+          });
+        }
       } catch {
         items = [];
       }
@@ -52,7 +65,10 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     return new Response(JSON.stringify(parsed), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      },
     });
   } catch (error: any) {
     return new Response(
@@ -72,8 +88,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const body = (await request.json()) as {
       id?: string;
       customer_id?: string | null;
+      customer_name?: string | null;
+      customer_phone?: string | null;
       dining_type?: string;
+      table_id?: string | null;
       table_number?: string | null;
+      waiter_id?: string | null;
+      waiter_name?: string | null;
       items: CheckoutLineItem[];
       notes?: string | null;
     };
@@ -87,8 +108,21 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     const diningType = body.dining_type?.trim() || 'Dine-In';
     const tableNumber = body.table_number?.trim() || null;
+    const customerName = body.customer_name?.trim() || null;
+    const customerPhone = body.customer_phone?.trim() || null;
     const notes = body.notes?.trim() || null;
-    const itemsJson = JSON.stringify(body.items);
+    const normalizedItems = body.items.map((it: any) => {
+      const resolvedName = (it.item_name || it.name || 'Menu Item').trim();
+      return {
+        menu_item_id: it.menu_item_id || undefined,
+        item_name: resolvedName,
+        name: resolvedName,
+        quantity: Math.max(1, Number(it.quantity) || 1),
+        unit_price: Math.max(0, Number(it.unit_price ?? it.price) || 0),
+        notes: it.notes || undefined,
+      };
+    });
+    const itemsJson = JSON.stringify(normalizedItems);
     const staffAttribution = `${auth.user.name} (${auth.user.role})`;
     const now = new Date().toISOString();
 
@@ -101,22 +135,39 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       if (existing) {
         await env.DB.prepare(
           `UPDATE draft_orders
-           SET customer_id = ?, dining_type = ?, table_number = ?, items_json = ?, notes = ?, created_by = ?
+           SET customer_id = COALESCE(?, customer_id),
+               customer_name = COALESCE(?, customer_name),
+               customer_phone = COALESCE(?, customer_phone),
+               dining_type = ?,
+               table_id = COALESCE(?, table_id),
+               table_number = ?,
+               waiter_id = COALESCE(?, waiter_id),
+               waiter_name = COALESCE(?, waiter_name),
+               items_json = ?,
+               notes = ?,
+               created_by = ?,
+               updated_at = ?
            WHERE id = ?`
         ).bind(
           body.customer_id || null,
+          customerName,
+          customerPhone,
           diningType,
+          body.table_id || null,
           tableNumber,
+          body.waiter_id || null,
+          body.waiter_name || null,
           itemsJson,
           notes,
           staffAttribution,
+          now,
           body.id
         ).run();
 
-        if (tableNumber) {
+        if (tableNumber && tableNumber !== 'Takeaway' && tableNumber !== 'Delivery') {
           await env.DB.prepare(
-            "UPDATE cafe_tables SET status = 'occupied', active_order_id = ? WHERE table_number = ? OR table_name = ?"
-          ).bind(existing.id, tableNumber, tableNumber).run();
+            "UPDATE cafe_tables SET status = 'occupied', active_order_id = ? WHERE id = ? OR table_number = ? OR table_name = ?"
+          ).bind(existing.id, body.table_id || '', tableNumber, tableNumber).run();
         }
 
         return new Response(
@@ -126,9 +177,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               id: existing.id,
               draft_number: existing.draft_number,
               customer_id: body.customer_id || null,
+              customer_name: customerName,
+              customer_phone: customerPhone,
               dining_type: diningType,
+              table_id: body.table_id || null,
               table_number: tableNumber,
-              items: body.items,
+              items: normalizedItems,
               notes,
               created_by: staffAttribution,
               created_at: now,
@@ -143,24 +197,30 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const draftNumber = `DFT-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 900 + 100)}`;
 
     await env.DB.prepare(
-      `INSERT INTO draft_orders (id, draft_number, customer_id, dining_type, table_number, items_json, notes, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO draft_orders (id, draft_number, customer_id, customer_name, customer_phone, dining_type, table_id, table_number, waiter_id, waiter_name, items_json, notes, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       draftId,
       draftNumber,
       body.customer_id || null,
+      customerName,
+      customerPhone,
       diningType,
+      body.table_id || null,
       tableNumber,
+      body.waiter_id || auth.user.id,
+      body.waiter_name || auth.user.name,
       itemsJson,
       notes,
       staffAttribution,
+      now,
       now
     ).run();
 
-    if (tableNumber) {
+    if (tableNumber && tableNumber !== 'Takeaway' && tableNumber !== 'Delivery') {
       await env.DB.prepare(
-        "UPDATE cafe_tables SET status = 'occupied', active_order_id = ? WHERE table_number = ? OR table_name = ?"
-      ).bind(draftId, tableNumber, tableNumber).run();
+        "UPDATE cafe_tables SET status = 'occupied', active_order_id = ? WHERE id = ? OR table_number = ? OR table_name = ?"
+      ).bind(draftId, body.table_id || '', tableNumber, tableNumber).run();
     }
 
     return new Response(
@@ -170,9 +230,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           id: draftId,
           draft_number: draftNumber,
           customer_id: body.customer_id || null,
+          customer_name: customerName,
+          customer_phone: customerPhone,
           dining_type: diningType,
+          table_id: body.table_id || null,
           table_number: tableNumber,
-          items: body.items,
+          items: normalizedItems,
           notes,
           created_by: staffAttribution,
           created_at: now,

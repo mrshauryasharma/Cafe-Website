@@ -8,11 +8,13 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronRight,
+  Download,
 } from 'lucide-react';
 import { User } from '../../types';
 import { CustomerSummaryRow } from '../../../functions/api/customers/index';
 import { AddCustomerModal } from './AddCustomerModal';
 import { CustomerProfileView } from './CustomerProfileView';
+import { downloadCsvFile } from '../../utils/csvExport';
 
 interface CustomersDirectoryProps {
   currentUser: User;
@@ -51,6 +53,35 @@ export const CustomersDirectory: React.FC<CustomersDirectoryProps> = ({ currentU
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     fetchCustomers(search.trim());
+  };
+
+  const handleExportCsv = async () => {
+    let listToExport = customers;
+    if (isOnline && !search.trim()) {
+      try {
+        const res = await fetch('/api/customers?all=1');
+        if (res.ok) {
+          listToExport = (await res.json()) as CustomerSummaryRow[];
+        }
+      } catch {
+        // fallback cleanly to loaded directory slice
+      }
+    }
+
+    const rows: (string | number | null | undefined)[][] = [
+      ['Name', 'Phone', 'NFC Card UID', 'Points Balance', 'Total Visits', 'Total Spend (INR)', 'Last Visit'],
+      ...listToExport.map((c) => [
+        c.name,
+        c.phone,
+        c.card_uid || '',
+        c.points_balance ?? 0,
+        c.total_visits ?? 0,
+        c.total_spent ?? 0,
+        c.last_visit_at ? new Date(c.last_visit_at).toLocaleDateString() : '',
+      ]),
+    ];
+
+    downloadCsvFile(`kimmos-kitchen-customers-${new Date().toISOString().slice(0, 10)}.csv`, rows);
   };
 
   // If a customer is selected, show 360° profile view
@@ -107,13 +138,25 @@ export const CustomersDirectory: React.FC<CustomersDirectoryProps> = ({ currentU
           />
         </form>
 
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="min-h-[44px] bg-[#111111] hover:bg-[#262626] text-white font-semibold px-5 py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 shadow-xs transition-all whitespace-nowrap cursor-pointer"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>Add Customer</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={loading || customers.length === 0}
+            className="min-h-[44px] bg-[#FAF9F6] hover:bg-[#F3EFEA] disabled:opacity-50 text-[#111111] border border-[#E6E2DA] font-semibold px-4 py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 shadow-2xs transition-all whitespace-nowrap cursor-pointer"
+          >
+            <Download className="w-4 h-4" />
+            <span>Export CSV</span>
+          </button>
+
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="min-h-[44px] bg-[#111111] hover:bg-[#262626] text-white font-semibold px-5 py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 shadow-xs transition-all whitespace-nowrap cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Add Customer</span>
+          </button>
+        </div>
       </div>
 
       {/* Directory List / Table */}

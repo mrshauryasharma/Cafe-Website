@@ -10,6 +10,7 @@ export interface CafeTableRow {
   capacity: number;
   status: 'vacant' | 'occupied';
   active_order_id: string | null;
+  active_draft_id?: string | null;
   is_active: number;
   sort_order: number;
   created_at: string;
@@ -18,6 +19,11 @@ export interface CafeTableRow {
   active_draft_items_count?: number;
   active_draft_total?: number;
   active_draft_created_at?: string | null;
+  customer_id?: string | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  waiter_id?: string | null;
+  waiter_name?: string | null;
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -44,11 +50,18 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       SELECT 
         t.id, t.table_number, t.table_name, t.section, t.capacity, 
         t.status, t.active_order_id, t.is_active, t.sort_order, t.created_at,
+        d.id AS active_draft_id,
         d.draft_number AS active_draft_number,
         d.items_json AS active_draft_items_json,
-        d.created_at AS active_draft_created_at
+        d.created_at AS active_draft_created_at,
+        d.customer_id AS customer_id,
+        COALESCE(c.name, d.customer_name) AS customer_name,
+        COALESCE(c.phone, d.customer_phone) AS customer_phone,
+        d.waiter_id AS waiter_id,
+        d.waiter_name AS waiter_name
       FROM cafe_tables t
       LEFT JOIN draft_orders d ON (t.active_order_id = d.id OR t.table_number = d.table_number)
+      LEFT JOIN customers c ON d.customer_id = c.id
       WHERE t.is_active = 1
       ORDER BY t.sort_order ASC, t.table_number ASC
     `).all<{
@@ -62,9 +75,15 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       is_active: number;
       sort_order: number;
       created_at: string;
+      active_draft_id?: string | null;
       active_draft_number?: string | null;
       active_draft_items_json?: string | null;
       active_draft_created_at?: string | null;
+      customer_id?: string | null;
+      customer_name?: string | null;
+      customer_phone?: string | null;
+      waiter_id?: string | null;
+      waiter_name?: string | null;
     }>();
 
     // Map and deduplicate tables (in case multiple drafts somehow match)
@@ -80,8 +99,12 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
           try {
             const items = JSON.parse(r.active_draft_items_json);
             if (Array.isArray(items)) {
-              itemCount = items.reduce((acc, it) => acc + (it.quantity || 1), 0);
-              totalAmount = items.reduce((acc, it) => acc + (it.total_price || (it.price * (it.quantity || 1))), 0);
+              itemCount = items.reduce((acc, it) => acc + (Number(it.quantity) || 1), 0);
+              totalAmount = items.reduce(
+                (acc, it) =>
+                  acc + (Number(it.total_price) || (Number(it.unit_price ?? it.price) || 0) * (Number(it.quantity) || 1)),
+                0
+              );
               isOccupied = true;
             }
           } catch {
@@ -97,20 +120,29 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
           capacity: r.capacity,
           status: isOccupied ? 'occupied' : 'vacant',
           active_order_id: r.active_order_id,
+          active_draft_id: r.active_draft_id || r.active_order_id || null,
           is_active: r.is_active,
           sort_order: r.sort_order,
           created_at: r.created_at,
           active_draft_number: r.active_draft_number || null,
           active_draft_items_count: itemCount,
-          active_draft_total: totalAmount,
+          active_draft_total: Math.round(totalAmount * 100) / 100,
           active_draft_created_at: r.active_draft_created_at || null,
+          customer_id: r.customer_id || null,
+          customer_name: r.customer_name || null,
+          customer_phone: r.customer_phone || null,
+          waiter_id: r.waiter_id || null,
+          waiter_name: r.waiter_name || null,
         });
       }
     }
 
     return new Response(JSON.stringify(Array.from(tableMap.values())), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      },
     });
   } catch (error: any) {
     return new Response(

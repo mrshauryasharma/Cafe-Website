@@ -383,7 +383,7 @@ export const BrandingRulesTab: React.FC<BrandingRulesTabProps> = ({ onCafeNameCh
             </div>
             <div>
               <h3 className="font-bold text-base text-[#111111] font-serif">Tax (GST) & Packaging Charges</h3>
-              <p className="text-xs text-[#52525B]">Configure optional GST on bills and default takeaway packaging</p>
+              <p className="text-xs text-[#52525B]">Configure optional GST slabs on bills and default takeaway packaging</p>
             </div>
           </div>
 
@@ -396,6 +396,47 @@ export const BrandingRulesTab: React.FC<BrandingRulesTabProps> = ({ onCafeNameCh
             />
             <div className="w-11 h-6 bg-[#E6E2DA] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#111111]"></div>
           </label>
+        </div>
+
+        {/* Quick 1-Click GST Slab Buttons */}
+        <div className="space-y-1.5">
+          <label className="block text-xs font-semibold text-[#52525B] uppercase tracking-wider">
+            Quick GST Rate Presets
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { label: '0% Exempt', rate: 0 },
+              { label: '5% Café Standard', rate: 5 },
+              { label: '12%', rate: 12 },
+              { label: '18%', rate: 18 },
+            ].map((slab) => {
+              const isActive =
+                slab.rate === 0
+                  ? settings.gst_enabled === 0 || (settings.gst_rate ?? 0) === 0
+                  : settings.gst_enabled === 1 && Number(settings.gst_rate) === slab.rate;
+
+              return (
+                <button
+                  key={slab.label}
+                  type="button"
+                  onClick={() =>
+                    setSettings({
+                      ...settings,
+                      gst_enabled: slab.rate === 0 ? 0 : 1,
+                      gst_rate: slab.rate,
+                    })
+                  }
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold font-serif tabular-nums transition-all cursor-pointer border ${
+                    isActive
+                      ? 'bg-[#111111] text-white border-[#111111] shadow-xs'
+                      : 'bg-[#FAF9F6] hover:bg-[#F3EFEA] text-[#111111] border-[#E6E2DA]'
+                  }`}
+                >
+                  {slab.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {settings.gst_enabled === 1 && (

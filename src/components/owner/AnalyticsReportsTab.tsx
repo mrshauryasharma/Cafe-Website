@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { AnalyticsResponse } from '../../../functions/api/owner/analytics';
 import { ZReportModal } from './ZReportModal';
+import { DailySaleSummaryModal } from './DailySaleSummaryModal';
 
 export const AnalyticsReportsTab: React.FC = () => {
   const [range, setRange] = useState<'today' | '7d' | '30d' | '90d' | 'all'>('30d');
@@ -21,6 +22,7 @@ export const AnalyticsReportsTab: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showZReportModal, setShowZReportModal] = useState<boolean>(false);
+  const [showDailySummaryModal, setShowDailySummaryModal] = useState<boolean>(false);
 
   // Active hover states for charts
   const [hoveredBarIndex, setHoveredBarIndex] = useState<number | null>(null);
@@ -197,6 +199,16 @@ export const AnalyticsReportsTab: React.FC = () => {
               </button>
             ))}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setShowDailySummaryModal(true)}
+            title="Open Daily Sale Summary with Item-Wise Sales, Thermal Print & Excel CSV"
+            className="min-h-[38px] px-3.5 py-1.5 bg-[#ECFDF5] hover:bg-[#D1FAE5] text-[#166534] border border-[#BBF7D0] rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs whitespace-nowrap"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Daily Sale Summary</span>
+          </button>
 
           <button
             type="button"
@@ -977,6 +989,12 @@ export const AnalyticsReportsTab: React.FC = () => {
       <ZReportModal
         isOpen={showZReportModal}
         onClose={() => setShowZReportModal(false)}
+      />
+
+      {/* 8. DAILY SALE SUMMARY MODAL (80mm Print & Excel/CSV Export) */}
+      <DailySaleSummaryModal
+        isOpen={showDailySummaryModal}
+        onClose={() => setShowDailySummaryModal(false)}
       />
     </div>
   );

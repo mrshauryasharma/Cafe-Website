@@ -4,7 +4,8 @@ import { ensureSchema } from '../../utils/ensureSchema';
 
 interface PlaceOrderItem {
   menu_item_id?: string;
-  name: string;
+  name?: string;
+  item_name?: string;
   unit_price: number;
   quantity: number;
   notes?: string;
@@ -19,6 +20,13 @@ interface PlaceOrderPayload {
   order_notes?: string;
 }
 
+function normalizePhoneDigits(raw?: string): { clean: string; rawTrimmed: string } {
+  const rawTrimmed = raw ? raw.trim() : '';
+  const digits = rawTrimmed.replace(/\D/g, '');
+  const clean = digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits;
+  return { clean, rawTrimmed };
+}
+
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
   const auth = await requirePermission(request, env, 'can_take_orders');
@@ -28,7 +36,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     await ensureSchema(env.DB);
     const body = (await request.json()) as PlaceOrderPayload;
     const { table_id, items, order_notes } = body;
-    let { customer_name, customer_phone, customer_id } = body;
+    let customer_name = body.customer_name?.trim() || undefined;
+    let customer_phone = body.customer_phone?.trim() || undefined;
+    let customer_id = body.customer_id?.trim() || undefined;
 
     if (!table_id) {
       return new Response(JSON.stringify({ error: 'table_id is required' }), {
@@ -44,16 +54,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       });
     }
 
-    // Validate item values
-    const validatedItems: KotItem[] = [];
+    // Validate item values (preserve both `name` for KOT/OrderTerminal and `item_name` for Counter POS)
+    const validatedItems: (KotItem & { item_name: string })[] = [];
     for (const item of items) {
       const q = Math.max(1, Math.floor(Number(item.quantity) || 1));
       const p = Math.max(0, Number(item.unit_price) || 0);
-      const name = (item.name || 'Unnamed Item').trim();
+      const name = ((item.name || item.item_name) || 'Unnamed Item').trim();
       const notes = item.notes ? item.notes.trim() : undefined;
       validatedItems.push({
         menu_item_id: item.menu_item_id || undefined,
         name,
+        item_name: name,
         quantity: q,
         unit_price: p,
         notes,
@@ -80,17 +91,28 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     // Auto-match customer by phone if phone is provided
-    if (customer_phone && customer_phone.trim()) {
-      customer_phone = customer_phone.trim();
+    if (customer_phone) {
+      const { clean, rawTrimmed } = normalizePhoneDigits(customer_phone);
+      const lookupPhone = clean.length >= 10 ? clean : rawTrimmed;
+      customer_phone = lookupPhone;
       const existingCustomer = await env.DB.prepare(
-        'SELECT id, name, phone, points_balance FROM customers WHERE phone = ?'
-      ).bind(customer_phone).first<{ id: string; name: string; phone: string; points_balance: number }>();
+        'SELECT id, name, phone, points_balance FROM customers WHERE (phone = ? OR phone = ?) AND is_archived = 0 LIMIT 1'
+      ).bind(lookupPhone, rawTrimmed).first<{ id: string; name: string; phone: string; points_balance: number }>();
 
       if (existingCustomer) {
         customer_id = existingCustomer.id;
-        if (!customer_name || !customer_name.trim()) {
+        customer_phone = existingCustomer.phone;
+        if (!customer_name) {
           customer_name = existingCustomer.name;
         }
+      }
+    } else if (customer_id) {
+      const existingCustomer = await env.DB.prepare(
+        'SELECT id, name, phone FROM customers WHERE id = ? AND is_archived = 0 LIMIT 1'
+      ).bind(customer_id).first<{ id: string; name: string; phone: string }>();
+      if (existingCustomer) {
+        if (!customer_name) customer_name = existingCustomer.name;
+        if (!customer_phone) customer_phone = existingCustomer.phone;
       }
     }
 
@@ -136,8 +158,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                customer_id = COALESCE(?, customer_id),
                customer_name = COALESCE(?, customer_name),
                customer_phone = COALESCE(?, customer_phone),
-               waiter_id = ?,
-               waiter_name = ?,
+               waiter_id = COALESCE(NULLIF(waiter_id, ''), ?),
+               waiter_name = COALESCE(NULLIF(waiter_name, ''), ?),
                notes = COALESCE(?, notes),
                updated_at = ?
            WHERE id = ?`
@@ -224,8 +246,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         table_id: table.id,
         table_number: table.table_number,
         table_name: table.table_name,
+        customer_id: customer_id || null,
         customer_name: customer_name || null,
         customer_phone: customer_phone || null,
+        waiter_id: waiterId,
         waiter_name: waiterName,
         created_at: now,
       }),

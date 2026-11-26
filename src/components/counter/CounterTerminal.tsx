@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import {
   Search,
   Radio,
@@ -26,6 +26,8 @@ import {
   BookmarkCheck,
   Layers,
   Percent,
+  FileText,
+  Phone,
 } from 'lucide-react';
 import { User as AuthUser } from '../../types';
 import { MenuItem } from '../../../functions/api/owner/menu';
@@ -35,6 +37,7 @@ import { CheckoutReceipt, CheckoutLineItem } from '../../../functions/api/counte
 import { DraftOrderRow } from '../../../functions/api/counter/drafts';
 import { AddCustomerModal } from '../customers/AddCustomerModal';
 import { CustomerProfileView } from '../customers/CustomerProfileView';
+import { DailySaleSummaryModal } from '../owner/DailySaleSummaryModal';
 import { detectNfcCapabilities, normalizeCardInput } from '../../utils/nfcPlatform';
 
 interface CounterTerminalProps {
@@ -127,25 +130,92 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   const [submittingLink, setSubmittingLink] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
 
+  // Walk-In Customer & Waiter Attribution State (for Waiter Orders or Counter Walk-Ins)
+  const [walkInName, setWalkInName] = useState('');
+  const [walkInPhone, setWalkInPhone] = useState('');
+  const [draftWaiterId, setDraftWaiterId] = useState<string | null>(null);
+  const [draftWaiterName, setDraftWaiterName] = useState<string | null>(null);
+
+  // Flexible POS GST Toggle & Slab Rate
+  const [applyGst, setApplyGst] = useState<boolean>(false);
+  const [posGstRate, setPosGstRate] = useState<number>(5);
+
+  // Daily Sale Summary Modal
+  const [showDailySummary, setShowDailySummary] = useState(false);
+
   // Feedback
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [settledNotice, setSettledNotice] = useState<string | null>(null);
 
-  // 1. Initial Load of Menu, Settings & Active Drafts
-  const fetchDrafts = async () => {
+  // Live Multi-Device Sync Refs
+  const activeDraftIdRef = useRef<string | null>(activeDraftId);
+  const checkingOutRef = useRef<boolean>(checkingOut);
+  const receiptRef = useRef<CheckoutReceipt | null>(receipt);
+  const suppressStalePosNoticeRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    activeDraftIdRef.current = activeDraftId;
+  }, [activeDraftId]);
+  useEffect(() => {
+    checkingOutRef.current = checkingOut;
+  }, [checkingOut]);
+  useEffect(() => {
+    receiptRef.current = receipt;
+  }, [receipt]);
+
+  // 1. Fetch Active Drafts & Live Floor Status
+  const fetchDrafts = useCallback(async (silent = false) => {
     try {
-      setLoadingDrafts(true);
-      const res = await fetch('/api/counter/drafts');
-      if (res.ok) {
-        const data = (await res.json()) as DraftOrderRow[];
-        setDraftsList(data || []);
+      if (!silent) setLoadingDrafts(true);
+      const [draftsRes, tablesRes] = await Promise.all([
+        fetch('/api/counter/drafts'),
+        silent ? fetch('/api/tables') : Promise.resolve(null),
+      ]);
+
+      if (tablesRes && tablesRes.ok) {
+        const tablesData = (await tablesRes.json()) as any[];
+        if (Array.isArray(tablesData) && tablesData.length > 0) {
+          setAvailableTables(tablesData);
+        }
+      }
+
+      if (draftsRes.ok) {
+        const data = (await draftsRes.json()) as DraftOrderRow[];
+        const list = data || [];
+
+        // Check if active draft was settled or cleared by another terminal
+        const currentDraftId = activeDraftIdRef.current;
+        if (
+          currentDraftId &&
+          !checkingOutRef.current &&
+          !receiptRef.current &&
+          !suppressStalePosNoticeRef.current
+        ) {
+          const stillExists = list.some((d) => d.id === currentDraftId);
+          if (!stillExists) {
+            setCart([]);
+            setActiveDraftId(null);
+            setWalkInName('');
+            setWalkInPhone('');
+            setDraftWaiterId(null);
+            setDraftWaiterName(null);
+            setScanResult(null);
+            setScannedCardUid('');
+            setExtraDiscount('');
+            setRedeemPointsToggle(false);
+            setSettledNotice('Table bill was settled at Counter — table is now Vacant');
+          }
+        }
+        suppressStalePosNoticeRef.current = false;
+        setDraftsList(list);
       }
     } catch (err) {
-      console.error('Failed to fetch drafts', err);
+      if (!silent) console.error('Failed to fetch drafts', err);
     } finally {
-      setLoadingDrafts(false);
+      if (!silent) setLoadingDrafts(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const initCounter = async () => {
@@ -160,6 +230,10 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
         const data = (await counterRes.json()) as { menu_items: MenuItem[]; settings: CafeSettingsRow };
         setMenuItems(data.menu_items || []);
         setSettings(data.settings || null);
+        if (data.settings) {
+          setApplyGst(data.settings.gst_enabled === 1);
+          setPosGstRate(data.settings.gst_rate ?? 5);
+        }
 
         if (tablesRes.ok) {
           const tablesData = (await tablesRes.json()) as any[];
@@ -175,27 +249,59 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     };
 
     initCounter();
-    fetchDrafts();
-  }, []);
+    fetchDrafts(false);
+
+    const handleVisibilityOrFocus = () => {
+      if (!document.hidden) {
+        fetchDrafts(true);
+      }
+    };
+
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        fetchDrafts(true);
+      }
+    }, 5000);
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
+  }, [fetchDrafts]);
 
   useEffect(() => {
-    if (initialTableId && draftsList.length > 0) {
+    if (!initialTableId) return;
+    const matchedTable = availableTables.find(
+      (t) =>
+        t.id === initialTableId ||
+        t.table_number.toLowerCase() === initialTableId.toLowerCase()
+    );
+    const resolvedTableNumber = matchedTable ? matchedTable.table_number : initialTableId;
+
+    if (draftsList.length > 0) {
       const matchingDraft = draftsList.find(
         (d) =>
           d.table_id === initialTableId ||
-          d.table_number?.toLowerCase() === initialTableId.toLowerCase()
+          d.table_number?.toLowerCase() === initialTableId.toLowerCase() ||
+          (matchedTable &&
+            (d.table_id === matchedTable.id ||
+              d.table_number?.toLowerCase() === matchedTable.table_number.toLowerCase()))
       );
-      if (matchingDraft && activeDraftId !== matchingDraft.id) {
+      if (matchingDraft && activeDraftId !== matchingDraft.id && !receipt) {
         handleResumeDraft(matchingDraft);
       } else if (!matchingDraft && !activeDraftId) {
-        setTableNumber(initialTableId);
+        setTableNumber(resolvedTableNumber);
         setDiningType('dine_in');
       }
-    } else if (initialTableId) {
-      setTableNumber(initialTableId);
+    } else if (!activeDraftId) {
+      setTableNumber(resolvedTableNumber);
       setDiningType('dine_in');
     }
-  }, [initialTableId, draftsList]);
+  }, [initialTableId, draftsList, availableTables]);
 
   // Sync default packaging charge when dining mode is Takeaway or Delivery
   useEffect(() => {
@@ -474,7 +580,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
 
   // Taxable base includes packaging and excludes points redemption discount
   const taxableBase = Math.max(0, subtotalAfterExtra - pointsDiscountAmount + packagingAmountNum);
-  const gstRate = settings?.gst_enabled === 1 && (settings?.gst_rate ?? 0) > 0 ? (settings?.gst_rate ?? 0) : 0;
+  const gstRate = applyGst ? (posGstRate > 0 ? posGstRate : 5) : 0;
   const totalTax = gstRate > 0 ? Math.round((taxableBase * (gstRate / 100)) * 100) / 100 : 0;
   const cgstAmount = Math.round((totalTax / 2) * 100) / 100;
   const sgstAmount = Math.round((totalTax - cgstAmount) * 100) / 100;
@@ -504,14 +610,23 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     setError(null);
 
     try {
+      const matchingTableObj = availableTables.find(
+        (t) => t.table_number === tableNumber || t.id === tableNumber
+      );
+
       const res = await fetch('/api/counter/drafts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: activeDraftId || undefined,
+          table_id: diningType === 'dine_in' && matchingTableObj ? matchingTableObj.id : undefined,
           table_number: diningType === 'dine_in' ? tableNumber : diningType === 'takeaway' ? 'Takeaway' : 'Delivery',
           dining_type: diningType,
           customer_id: currentCustomer?.id || null,
+          customer_name: currentCustomer?.name || walkInName.trim() || null,
+          customer_phone: currentCustomer?.phone || walkInPhone.trim() || null,
+          waiter_id: draftWaiterId || undefined,
+          waiter_name: draftWaiterName || undefined,
           items: cart,
           notes: null,
         }),
@@ -525,7 +640,8 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
         setSuccess(`Order saved as Draft #${data.draft.draft_number} (${data.draft.table_number || diningType})!`);
         setTimeout(() => setSuccess(null), 3000);
       }
-      await fetchDrafts();
+      suppressStalePosNoticeRef.current = true;
+      await fetchDrafts(true);
     } catch (err: any) {
       setError(err.message || 'Failed to save draft order');
     } finally {
@@ -535,14 +651,37 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
 
   // Resume Draft into Active Terminal
   const handleResumeDraft = (draft: DraftOrderRow) => {
-    setCart(draft.items || []);
-    setDiningType((draft.dining_type as any) || 'dine_in');
-    if (draft.table_number) setTableNumber(draft.table_number);
+    setSettledNotice(null);
+    const normalizedCart: CartItem[] = (draft.items || []).map((it: any) => ({
+      menu_item_id: it.menu_item_id || undefined,
+      item_name: (it.item_name || it.name || 'Menu Item').trim(),
+      quantity: Math.max(1, Number(it.quantity) || 1),
+      unit_price: Math.max(0, Number(it.unit_price ?? it.price) || 0),
+      notes: it.notes || undefined,
+    }));
+    setCart(normalizedCart);
+
+    const normalizedDining = (draft.dining_type || 'dine_in').toLowerCase();
+    setDiningType(
+      normalizedDining === 'takeaway' ? 'takeaway' : normalizedDining === 'delivery' ? 'delivery' : 'dine_in'
+    );
+
+    if (draft.table_number) {
+      setTableNumber(draft.table_number);
+    } else if (draft.table_id) {
+      const tMatch = availableTables.find((t) => t.id === draft.table_id);
+      if (tMatch) setTableNumber(tMatch.table_number);
+    }
+
     setActiveDraftId(draft.id);
+    setDraftWaiterId(draft.waiter_id || null);
+    setDraftWaiterName(draft.waiter_name || null);
+    setWalkInName(draft.customer_name || '');
+    setWalkInPhone(draft.customer_phone || '');
     setShowDraftsDrawer(false);
 
     if (draft.customer_id) {
-      // Lookup customer
+      // Lookup full CRM profile
       fetch(`/api/customers/${draft.customer_id}`)
         .then((r) => r.json())
         .then((data: any) => {
@@ -556,6 +695,36 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
           }
         })
         .catch(console.error);
+    } else if (draft.customer_phone && draft.customer_phone.replace(/\D/g, '').length >= 10) {
+      setScanResult(null);
+      setScannedCardUid('');
+      const cleanPhone = draft.customer_phone.replace(/\D/g, '');
+      fetch(`/api/customers?search=${encodeURIComponent(cleanPhone)}`)
+        .then(async (r) => (r.ok ? await r.json() : []))
+        .then((matches: any) => {
+          const list = Array.isArray(matches) ? matches : [];
+          const exact = list.find((c: any) => c.phone === cleanPhone || c.phone === draft.customer_phone);
+          if (exact) {
+            return fetch(`/api/customers/${exact.id}`).then((r) => r.json());
+          }
+          return null;
+        })
+        .then((data: any) => {
+          if (data?.customer) {
+            setScanResult({
+              cardStatus: 'active',
+              card_uid: data.customer.card_uid || 'AUTO-MATCHED',
+              customer: data.customer,
+              crm: data.metrics,
+            });
+          }
+        })
+        .catch(() => {
+          // Keep walk-in details populated for auto-registration at checkout
+        });
+    } else {
+      setScanResult(null);
+      setScannedCardUid('');
     }
 
     setSuccess(`Loaded Draft #${draft.draft_number} into Active Order.`);
@@ -570,8 +739,16 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     try {
       const res = await fetch(`/api/counter/drafts/${draftId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete draft');
-      if (activeDraftId === draftId) setActiveDraftId(null);
-      await fetchDrafts();
+      if (activeDraftId === draftId) {
+        setActiveDraftId(null);
+        setCart([]);
+        setWalkInName('');
+        setWalkInPhone('');
+        setDraftWaiterId(null);
+        setDraftWaiterName(null);
+      }
+      suppressStalePosNoticeRef.current = true;
+      await fetchDrafts(true);
     } catch (err: any) {
       alert(err.message || 'Failed to delete draft');
     }
@@ -590,7 +767,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
         : `KOT-${Date.now().toString().slice(-4)}`,
       dining_type: diningType,
       table_number: diningType === 'dine_in' ? tableNumber : null,
-      server_name: currentUser.name || currentUser.username,
+      server_name: draftWaiterName || currentUser.name || currentUser.username,
       items: [...cart],
       created_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     });
@@ -602,9 +779,12 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
   };
 
   // Checkout Handler
+  const walkInDigits = walkInPhone.replace(/\D/g, '');
+  const hasValidCustomerForCheckout = Boolean(currentCustomer) || walkInDigits.length >= 10;
+
   const handleCheckout = async () => {
-    if (!currentCustomer) {
-      alert('Please select, search, or scan a customer membership card before completing the bill.');
+    if (!hasValidCustomerForCheckout) {
+      alert('Please scan/select a customer card OR enter a valid 10-digit customer mobile number to settle & earn loyalty points.');
       return;
     }
     if (cart.length === 0 || subtotal <= 0) {
@@ -620,6 +800,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
 
     setCheckingOut(true);
     setError(null);
+    setSettledNotice(null);
 
     const idempotencyKey = `idemp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
@@ -632,7 +813,9 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customer_id: currentCustomer.id,
+          customer_id: currentCustomer?.id,
+          customer_name: !currentCustomer ? (walkInName.trim() || 'Guest') : undefined,
+          customer_phone: !currentCustomer ? walkInPhone.trim() : undefined,
           items: cart,
           redeem_points: redeemPointsToggle,
           custom_redeem_points: pointsToRedeem,
@@ -643,6 +826,8 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
           extra_discount: extraDiscountNum,
           packaging_amount: packagingAmountNum,
           tax_amount: totalTax,
+          apply_gst: applyGst,
+          gst_rate: applyGst ? gstRate : 0,
           payment_method: paymentMethod,
           split_details:
             paymentMethod === 'split'
@@ -652,6 +837,8 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                   card: splitCardNum,
                 }
               : undefined,
+          waiter_id: draftWaiterId || undefined,
+          waiter_name: draftWaiterName || undefined,
           draft_id: activeDraftId || undefined,
         }),
       });
@@ -662,7 +849,10 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
       if (data.receipt) {
         setReceipt(data.receipt);
         setActiveDraftId(null);
-        await fetchDrafts();
+        setDraftWaiterId(null);
+        setDraftWaiterName(null);
+        suppressStalePosNoticeRef.current = true;
+        await fetchDrafts(true);
         setScanResult((prev) =>
           prev && prev.customer
             ? {
@@ -692,11 +882,20 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
     setRedeemPointsToggle(false);
     setScanResult(null);
     setScannedCardUid('');
+    setWalkInName('');
+    setWalkInPhone('');
+    setDraftWaiterId(null);
+    setDraftWaiterName(null);
     setActiveDraftId(null);
+    setSettledNotice(null);
     setPaymentMethod('cash');
     setSplitCash('');
     setSplitUpi('');
     setSplitCard('');
+    if (settings) {
+      setApplyGst(settings.gst_enabled === 1);
+      setPosGstRate(settings.gst_rate ?? 5);
+    }
   };
 
   // Bonus points grant from CRM strip
@@ -786,6 +985,18 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
         <div className="p-3.5 bg-[#ECFDF5] border border-[#BBF7D0] rounded-xl text-[#166534] text-xs flex items-center gap-2 font-semibold">
           <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
           <span>{success}</span>
+        </div>
+      )}
+
+      {settledNotice && (
+        <div className="p-3.5 bg-[#FFFBEB] border border-[#FDE68A] rounded-xl text-[#92400E] text-xs flex items-center justify-between shadow-2xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-[#D97706]" />
+            <span className="font-semibold">{settledNotice}</span>
+          </div>
+          <button onClick={() => setSettledNotice(null)} className="text-[#92400E] hover:text-[#111111] p-1 cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -1077,7 +1288,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
               />
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {/* Live Low Stock Indicator Pill */}
               {lowStockAlertCount > 0 && (
                 <div
@@ -1087,6 +1298,19 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                   <AlertCircle className="w-3.5 h-3.5 text-[#D97706] flex-shrink-0" />
                   <span>{lowStockAlertCount} Low Stock</span>
                 </div>
+              )}
+
+              {/* Today's Sale Summary Button (for Owner or Manager/Staff with can_view_reports) */}
+              {(currentUser.role === 'owner' || currentUser.permissions?.can_view_reports) && (
+                <button
+                  type="button"
+                  onClick={() => setShowDailySummary(true)}
+                  title="View Today's Sale Summary, Payment Drawer Totals & Print/CSV"
+                  className="min-h-[42px] px-3.5 py-2 bg-[#ECFDF5] hover:bg-[#D1FAE5] text-[#166534] rounded-xl text-xs font-bold border border-[#BBF7D0] flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
+                >
+                  <FileText className="w-4 h-4 text-[#166534]" />
+                  <span>Today&apos;s Sale</span>
+                </button>
               )}
 
               {/* Drafts Drawer Trigger Button */}
@@ -1268,6 +1492,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                     {scanResult?.crm?.most_ordered_items?.[0]
                       ? `Fav: ${scanResult.crm.most_ordered_items[0].item_name}`
                       : `${currentCustomer.total_visits} total visits`}
+                    {draftWaiterName ? ` • Server: ${draftWaiterName}` : ''}
                   </span>
                 </div>
 
@@ -1308,16 +1533,56 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
               </div>
             </div>
           ) : (
-            <div className="bg-white border border-[#E6E2DA] border-dashed rounded-2xl p-3.5 text-center text-xs text-[#52525B] flex items-center justify-between gap-2 shadow-2xs">
-              <span className="font-serif">No customer attached. Tap card or search above.</span>
-              <button
-                type="button"
-                onClick={() => setShowAddCustomerModal(true)}
-                className="px-2.5 py-1.5 bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] rounded-xl text-xs font-bold border border-[#E6E2DA] flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>+ Register</span>
-              </button>
+            <div className="bg-white border border-[#E6E2DA] rounded-2xl p-3.5 space-y-2.5 shadow-2xs text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="font-bold text-[#111111] font-serif text-sm">
+                    Walk-In / Guest Customer
+                  </p>
+                  <p className="text-[11px] text-[#52525B]">
+                    {draftWaiterName ? `Table Server: ${draftWaiterName} • ` : ''}
+                    Enter mobile to auto-register &amp; award loyalty points
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddCustomerModal(true)}
+                  className="px-2.5 py-1.5 bg-[#F3EFEA] hover:bg-[#E6E2DA] text-[#111111] rounded-xl text-xs font-bold border border-[#E6E2DA] flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>+ Link Card</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="relative">
+                  <User className="w-3.5 h-3.5 text-[#71717A] absolute left-2.5 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Guest Name (optional)"
+                    value={walkInName}
+                    onChange={(e) => setWalkInName(e.target.value)}
+                    className="w-full bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-[#111111] font-serif focus:outline-none focus:border-[#111111] focus:bg-white"
+                  />
+                </div>
+                <div className="relative">
+                  <Phone className="w-3.5 h-3.5 text-[#71717A] absolute left-2.5 top-2.5" />
+                  <input
+                    type="tel"
+                    placeholder="10-Digit Mobile (Req.)"
+                    value={walkInPhone}
+                    onChange={(e) => setWalkInPhone(e.target.value.replace(/[^0-9]/g, '').slice(0, 10))}
+                    className="w-full bg-[#FAF9F6] border border-[#E6E2DA] rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-[#111111] font-mono tabular-nums focus:outline-none focus:border-[#111111] focus:bg-white"
+                  />
+                </div>
+              </div>
+
+              {walkInDigits.length >= 10 && (
+                <div className="px-2.5 py-1.5 bg-[#ECFDF5] border border-[#BBF7D0] rounded-lg text-[11px] text-[#166534] font-semibold flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>Ready — Guest will be auto-registered &amp; credited +{pointsToEarn} pts on settlement</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -1613,19 +1878,67 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                 </div>
               )}
 
-              {/* Optional GST Calculation Breakdown */}
-              {settings?.gst_enabled === 1 && (settings?.gst_rate ?? 0) > 0 && (
-                <div className="space-y-1 pt-2 border-t border-[#E6E2DA] text-[#52525B]">
-                  <div className="flex justify-between font-semibold text-[#111111]">
-                    <span>GST ({settings.gst_rate}%):</span>
-                    <span className="font-mono tabular-nums">₹{totalTax}</span>
-                  </div>
-                  <div className="flex justify-between text-[10px] text-[#71717A] pl-2 font-mono tabular-nums">
-                    <span>CGST ({(settings.gst_rate / 2).toFixed(1)}%): ₹{cgstAmount}</span>
-                    <span>SGST ({(settings.gst_rate / 2).toFixed(1)}%): ₹{sgstAmount}</span>
-                  </div>
+              {/* Interactive POS GST (CGST + SGST) Toggle Pill & Breakdown */}
+              <div className="space-y-1.5 pt-2 border-t border-[#E6E2DA] text-[#52525B]">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={applyGst}
+                    onClick={() => {
+                      const next = !applyGst;
+                      setApplyGst(next);
+                      if (next && posGstRate <= 0) {
+                        setPosGstRate(settings?.gst_rate && settings.gst_rate > 0 ? settings.gst_rate : 5);
+                      }
+                    }}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer border ${
+                      applyGst
+                        ? 'bg-[#111111] text-white border-[#111111] shadow-2xs'
+                        : 'bg-white text-[#52525B] border-[#E6E2DA] hover:text-[#111111]'
+                    }`}
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full ${applyGst ? 'bg-[#4ADE80]' : 'bg-[#A1A1AA]'}`}
+                    />
+                    <span>Apply GST (CGST + SGST)</span>
+                    {applyGst && (
+                      <span className="font-mono tabular-nums text-[10px] opacity-90">
+                        {gstRate}%
+                      </span>
+                    )}
+                  </button>
+
+                  <span className="font-mono font-bold text-[#111111] tabular-nums">
+                    ₹{totalTax}
+                  </span>
                 </div>
-              )}
+
+                {applyGst && (
+                  <div className="space-y-1 pl-1">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {[5, 12, 18].map((slab) => (
+                        <button
+                          key={slab}
+                          type="button"
+                          onClick={() => setPosGstRate(slab)}
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold tabular-nums transition-colors cursor-pointer border ${
+                            gstRate === slab
+                              ? 'bg-[#F3EFEA] text-[#111111] border-[#111111]'
+                              : 'bg-white text-[#71717A] border-[#E6E2DA] hover:text-[#111111]'
+                          }`}
+                        >
+                          {slab}%
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex justify-between text-[10px] text-[#71717A] font-mono tabular-nums">
+                      <span>CGST ({(gstRate / 2).toFixed(1)}%): ₹{cgstAmount}</span>
+                      <span>SGST ({(gstRate / 2).toFixed(1)}%): ₹{sgstAmount}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* Payment Method Selector */}
               <div className="pt-2 border-t border-[#E6E2DA] space-y-1">
@@ -1835,7 +2148,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                 <button
                   type="button"
                   onClick={handleCheckout}
-                  disabled={!isOnline || checkingOut || cart.length === 0 || !currentCustomer}
+                  disabled={!isOnline || checkingOut || cart.length === 0 || !hasValidCustomerForCheckout}
                   className="w-full min-h-[46px] bg-[#111111] hover:bg-[#262626] disabled:opacity-50 text-white font-bold py-2.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
                 >
                   <CheckCircle2 className="w-4 h-4" />
@@ -1844,8 +2157,8 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                       ? 'Offline Mode — Billing Disabled'
                       : checkingOut
                       ? 'Processing Checkout...'
-                      : !currentCustomer
-                      ? 'Scan NFC Card or Select Customer'
+                      : !hasValidCustomerForCheckout
+                      ? 'Scan NFC Card or Enter Customer Mobile'
                       : `Confirm & Complete Bill (₹${finalAmount})`}
                   </span>
                 </button>
@@ -2092,7 +2405,9 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                   <p className="text-[10px] text-[#52525B] font-mono mt-0.5">GSTIN: {receipt.gstin}</p>
                 )}
                 <p className="text-[10px] text-[#52525B] mt-0.5">Order #{receipt.order_number}</p>
-                <p className="text-[9px] text-[#71717A]">{receipt.created_at || new Date().toLocaleString()}</p>
+                <p className="text-[9px] text-[#71717A]">
+                  {receipt.created_at ? new Date(receipt.created_at).toLocaleString('en-IN') : new Date().toLocaleString('en-IN')}
+                </p>
               </div>
 
               {/* Customer & Dining Meta */}
@@ -2102,7 +2417,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                   <strong className="font-serif">{receipt.customer_name}</strong>
                 </div>
                 <div className="text-right">
-                  <span className="text-[#52525B]">Phone:</span> {receipt.customer_phone}
+                  <span className="text-[#52525B]">Mobile:</span> {receipt.customer_phone}
                 </div>
                 <div>
                   <span className="text-[#52525B]">Type:</span>{' '}
@@ -2114,7 +2429,7 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                 </div>
                 {receipt.waiter_name && (
                   <div>
-                    <span className="text-[#52525B]">Server:</span>{' '}
+                    <span className="text-[#52525B]">Waiter:</span>{' '}
                     <strong className="font-serif">{receipt.waiter_name}</strong>
                   </div>
                 )}
@@ -2162,10 +2477,12 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
                     <span className="font-mono tabular-nums">-₹{receipt.extra_discount}</span>
                   </div>
                 )}
-                {receipt.discount_amount > 0 && (
+                {receipt.points_redeemed > 0 && (
                   <div className="flex justify-between text-[#166534]">
                     <span>Points Redeemed ({receipt.points_redeemed} pts):</span>
-                    <span className="font-mono tabular-nums">-₹{receipt.discount_amount}</span>
+                    <span className="font-mono tabular-nums">
+                      -₹{Math.round(Math.max(0, receipt.discount_amount - (receipt.extra_discount || 0)) * 100) / 100}
+                    </span>
                   </div>
                 )}
                 {receipt.packaging_amount > 0 && (
@@ -2504,6 +2821,11 @@ export const CounterTerminal: React.FC<CounterTerminalProps> = ({
           }}
         />
       )}
+      {/* 11. DAILY SALE SUMMARY MODAL */}
+      <DailySaleSummaryModal
+        isOpen={showDailySummary}
+        onClose={() => setShowDailySummary(false)}
+      />
     </div>
   );
 };

@@ -23,10 +23,16 @@ interface TablesBoardProps {
 }
 
 interface TableWithDraft extends CafeTable {
+  active_draft_id?: string | null;
   active_draft_number?: string | null;
   active_draft_items_count?: number;
   active_draft_total?: number;
   active_draft_created_at?: string | null;
+  customer_id?: string | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  waiter_id?: string | null;
+  waiter_name?: string | null;
 }
 
 export const TablesBoard: React.FC<TablesBoardProps> = ({ currentUser, isOnline = true }) => {
@@ -62,9 +68,9 @@ export const TablesBoard: React.FC<TablesBoardProps> = ({ currentUser, isOnline 
   const [formSortOrder, setFormSortOrder] = useState(1);
   const [submittingForm, setSubmittingForm] = useState(false);
 
-  const fetchTables = async () => {
+  const fetchTables = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const res = await fetch('/api/tables');
       if (!res.ok) {
         const errData = (await res.json()) as { error?: string };
@@ -73,17 +79,38 @@ export const TablesBoard: React.FC<TablesBoardProps> = ({ currentUser, isOnline 
       const data = (await res.json()) as TableWithDraft[];
       setTables(data);
     } catch (err: any) {
-      setError(err.message || 'Error loading tables');
+      if (!silent) {
+        setError(err.message || 'Error loading tables');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchTables();
-    // Auto-refresh every 15 seconds to reflect live floor updates
-    const interval = setInterval(fetchTables, 15000);
-    return () => clearInterval(interval);
+    fetchTables(false);
+
+    const handleVisibilityOrFocus = () => {
+      if (!document.hidden) {
+        fetchTables(true);
+      }
+    };
+
+    // Multi-device live sync every 5 seconds when tab is visible
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        fetchTables(true);
+      }
+    }, 5000);
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
   }, []);
 
   // Distinct sections
@@ -311,7 +338,7 @@ export const TablesBoard: React.FC<TablesBoardProps> = ({ currentUser, isOnline 
         {/* Action Controls */}
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
-            onClick={fetchTables}
+            onClick={() => fetchTables(false)}
             title="Refresh floor board"
             className="p-2.5 bg-[#FAF9F6] hover:bg-[#F3EFEA] border border-[#E6E2DA] rounded-xl text-[#52525B] hover:text-[#111111] transition-colors cursor-pointer"
           >
@@ -483,6 +510,18 @@ export const TablesBoard: React.FC<TablesBoardProps> = ({ currentUser, isOnline 
                                   hour: '2-digit',
                                   minute: '2-digit',
                                 })}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {(t.customer_name || t.waiter_name) && (
+                          <div className="flex items-center justify-between text-[10px] text-[#71717A] pt-1 border-t border-[#FDE68A]/60 truncate gap-2">
+                            <span className="truncate font-serif">
+                              {t.customer_name ? `Guest: ${t.customer_name}` : 'Walk-in Guest'}
+                            </span>
+                            {t.waiter_name && (
+                              <span className="truncate font-semibold text-[#92400E]">
+                                {t.waiter_name}
                               </span>
                             )}
                           </div>

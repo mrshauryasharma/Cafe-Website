@@ -25,6 +25,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   try {
     const url = new URL(request.url);
     const search = url.searchParams.get('search')?.trim().toLowerCase() || '';
+    const includeAll = url.searchParams.get('all') === '1';
 
     let query = `
       SELECT 
@@ -57,7 +58,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       bindings.push(term, term, term);
     }
 
-    query += ` ORDER BY COALESCE(last_visit_at, c.created_at) DESC LIMIT 200`;
+    query += includeAll
+      ? ` ORDER BY COALESCE(last_visit_at, c.created_at) DESC`
+      : ` ORDER BY COALESCE(last_visit_at, c.created_at) DESC LIMIT 200`;
 
     const customersResult = await env.DB.prepare(query).bind(...bindings).all<CustomerSummaryRow>();
 

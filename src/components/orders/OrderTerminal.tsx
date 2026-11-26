@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import {
   UtensilsCrossed,
   Search,
@@ -53,9 +53,18 @@ export const OrderTerminal: React.FC<OrderTerminalProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [settledNotice, setSettledNotice] = useState<string | null>(null);
+
+  const wasOccupiedMapRef = useRef<Record<string, boolean>>({});
+  const suppressSettledNoticeRef = useRef<boolean>(false);
 
   // Selected Table
   const [selectedTableId, setSelectedTableId] = useState<string>(initialTableId || '');
+  const selectedTableIdRef = useRef<string>(selectedTableId);
+
+  useEffect(() => {
+    selectedTableIdRef.current = selectedTableId;
+  }, [selectedTableId]);
 
   // Customer Details
   const [customerPhone, setCustomerPhone] = useState('');
@@ -112,50 +121,101 @@ export const OrderTerminal: React.FC<OrderTerminalProps> = ({
     'Kitchen delay / Long wait',
   ];
 
-  // Fetch initial data
-  const fetchData = async () => {
+  // Fetch initial data & light poll for live floor sync
+  const fetchData = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const [tablesRes, initRes] = await Promise.all([
         fetch('/api/tables'),
-        fetch('/api/counter/init'),
+        silent ? Promise.resolve(null) : fetch('/api/counter/init'),
       ]);
 
       if (tablesRes.ok) {
         const tablesData = (await tablesRes.json()) as TableWithDraft[];
+        const activeId = selectedTableIdRef.current;
+
+        if (activeId && !suppressSettledNoticeRef.current) {
+          const activeTableNow = tablesData.find(
+            (t) => t.id === activeId || t.table_number.toLowerCase() === activeId.toLowerCase()
+          );
+          if (
+            activeTableNow &&
+            wasOccupiedMapRef.current[activeTableNow.id] === true &&
+            activeTableNow.status === 'vacant'
+          ) {
+            setRunningDraft(null);
+            setCart([]);
+            setOrderNotes('');
+            setCustomerPhone('');
+            setCustomerName('');
+            setMatchedCustomer(null);
+            setSettledNotice('Table bill was settled at Counter — table is now Vacant');
+          }
+        }
+        suppressSettledNoticeRef.current = false;
+
+        tablesData.forEach((t) => {
+          wasOccupiedMapRef.current[t.id] = t.status === 'occupied';
+        });
+
         setTables(tablesData || []);
 
-        // If no table selected or invalid, select initial or first vacant table
-        if (tablesData.length > 0) {
+        // If no table selected or invalid, select initial or first table
+        if (tablesData.length > 0 && !silent) {
           if (initialTableId) {
-            const matched = tablesData.find((t) => t.id === initialTableId || t.table_number.toLowerCase() === initialTableId.toLowerCase());
+            const matched = tablesData.find(
+              (t) => t.id === initialTableId || t.table_number.toLowerCase() === initialTableId.toLowerCase()
+            );
             if (matched) {
               setSelectedTableId(matched.id);
-            } else if (!selectedTableId) {
+            } else if (!activeId) {
               setSelectedTableId(tablesData[0].id);
             }
-          } else if (!selectedTableId) {
+          } else if (!activeId) {
             const firstT = tablesData.find((t) => t.table_number.startsWith('T-')) || tablesData[0];
             setSelectedTableId(firstT.id);
           }
         }
       }
 
-      if (initRes.ok) {
+      if (initRes && initRes.ok) {
         const initData = (await initRes.json()) as { menu_items?: MenuItem[] };
         setMenuItems(initData.menu_items || []);
       }
     } catch (err: any) {
-      console.error('Failed to load order terminal data:', err);
-      setError('Failed to load menu & table layout.');
+      if (!silent) {
+        console.error('Failed to load order terminal data:', err);
+        setError('Failed to load menu & table layout.');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, [initialTableId]);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    fetchData(false);
+
+    const handleVisibilityOrFocus = () => {
+      if (!document.hidden) {
+        fetchData(true);
+      }
+    };
+
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        fetchData(true);
+      }
+    }, 5000);
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
+  }, [fetchData]);
 
   // Update selected table if initialTableId changes
   useEffect(() => {
@@ -165,6 +225,7 @@ export const OrderTerminal: React.FC<OrderTerminalProps> = ({
       );
       if (match && match.id !== selectedTableId) {
         setSelectedTableId(match.id);
+        setSettledNotice(null);
       }
     }
   }, [initialTableId, tables, selectedTableId]);
@@ -179,23 +240,32 @@ export const OrderTerminal: React.FC<OrderTerminalProps> = ({
   }, [tables, selectedTableId]);
 
   // Load Running Draft when table is occupied
-  const fetchRunningDraft = async (table: TableWithDraft) => {
-    if (table.status !== 'occupied' || !table.active_draft_id) {
+  const fetchRunningDraft = async (table: TableWithDraft, silent = false) => {
+    const draftRefId = table.active_draft_id || table.active_order_id;
+    if (table.status !== 'occupied' || !draftRefId) {
       setRunningDraft(null);
       return;
     }
 
     try {
-      setLoadingDraft(true);
+      if (!silent) setLoadingDraft(true);
       const res = await fetch('/api/counter/drafts');
       if (res.ok) {
         const drafts = (await res.json()) as any[];
-        const match = drafts.find((d) => d.id === table.active_draft_id);
+        const match = drafts.find(
+          (d) =>
+            d.id === draftRefId ||
+            (d.table_id && d.table_id === table.id) ||
+            d.table_number === table.table_number
+        );
         if (match) {
           setRunningDraft({
             id: match.id,
             draft_number: match.draft_number,
-            items: match.items || [],
+            items: (match.items || []).map((it: any) => ({
+              ...it,
+              name: it.name || it.item_name || 'Menu Item',
+            })),
             customer_name: match.customer_name,
             customer_phone: match.customer_phone,
             created_at: match.created_at,
@@ -215,17 +285,17 @@ export const OrderTerminal: React.FC<OrderTerminalProps> = ({
     } catch (err) {
       console.warn('Error loading running draft:', err);
     } finally {
-      setLoadingDraft(false);
+      if (!silent) setLoadingDraft(false);
     }
   };
 
   useEffect(() => {
     if (currentTable) {
-      fetchRunningDraft(currentTable);
+      fetchRunningDraft(currentTable, false);
     } else {
       setRunningDraft(null);
     }
-  }, [currentTable?.id, currentTable?.status, currentTable?.active_draft_id]);
+  }, [currentTable?.id, currentTable?.status, currentTable?.active_draft_id, currentTable?.active_draft_items_count]);
 
   // Debounced Customer Phone Search
   useEffect(() => {
@@ -391,7 +461,9 @@ export const OrderTerminal: React.FC<OrderTerminalProps> = ({
       });
 
       // Refresh table state
-      await fetchData();
+      suppressSettledNoticeRef.current = true;
+      setSettledNotice(null);
+      await fetchData(true);
     } catch (err: any) {
       setError(err.message || 'Error placing order');
     } finally {
@@ -421,8 +493,9 @@ export const OrderTerminal: React.FC<OrderTerminalProps> = ({
 
       setSuccess(data.message || 'Table shifted successfully');
       setShowShiftModal(false);
+      suppressSettledNoticeRef.current = true;
       setSelectedTableId(shiftTargetTableId);
-      await fetchData();
+      await fetchData(true);
     } catch (err: any) {
       setError(err.message || 'Error shifting table');
     } finally {
@@ -455,7 +528,8 @@ export const OrderTerminal: React.FC<OrderTerminalProps> = ({
 
       setSuccess(`Cancelled ${cancelQty}x ${cancellingItem.item.name}. Cancellation KOT issued.`);
       setCancellingItem(null);
-      await fetchData();
+      suppressSettledNoticeRef.current = true;
+      await fetchData(true);
     } catch (err: any) {
       setError(err.message || 'Failed to cancel item');
     } finally {
@@ -499,6 +573,18 @@ export const OrderTerminal: React.FC<OrderTerminalProps> = ({
         </div>
       )}
 
+      {settledNotice && (
+        <div className="p-3.5 bg-[#FFFBEB] border border-[#FDE68A] rounded-xl text-[#92400E] text-xs sm:text-sm flex items-center justify-between shadow-2xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-[#D97706]" />
+            <span className="font-semibold">{settledNotice}</span>
+          </div>
+          <button onClick={() => setSettledNotice(null)} className="p-1 cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Top Header Card: Table Selector & Customer Info */}
       <div className="bg-white border border-[#E6E2DA] rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
         {/* Table Selector & Status */}
@@ -515,6 +601,10 @@ export const OrderTerminal: React.FC<OrderTerminalProps> = ({
                 value={selectedTableId}
                 onChange={(e) => {
                   setSelectedTableId(e.target.value);
+                  setSettledNotice(null);
+                  setCustomerPhone('');
+                  setCustomerName('');
+                  setMatchedCustomer(null);
                   navigate(`/order/${encodeURIComponent(e.target.value)}`);
                 }}
                 className="font-serif font-bold text-base sm:text-lg text-[#111111] bg-transparent border-0 p-0 focus:ring-0 cursor-pointer"
